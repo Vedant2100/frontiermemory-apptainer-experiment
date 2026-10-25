@@ -1,6 +1,6 @@
 # FrontierMemory Apptainer exploratory experiment
 
-A one-task A/B comparison of Mini-SWE-Agent with and without learned workflow memory, run locally on a Slurm GPU cluster. This is an exploratory run, not a leaderboard result.
+Exploratory FrontierMemory coding experiments on a Slurm GPU cluster using Apptainer and local Ollama models. These are diagnostic runs, not leaderboard results.
 
 ## Result
 
@@ -12,6 +12,10 @@ A one-task A/B comparison of Mini-SWE-Agent with and without learned workflow me
 Both runs used the same local Qwen2.5-Coder 7B Q4 model, Mini-SWE-Agent 2.4.6, task image, task, verifier, and 50-call limit. B changed tool behavior: A mostly alternated between reading two source files, while B repeated a search for `initialize`. Neither solved the task. The memory increased prompt tokens without changing verifier outcome.
 
 Full sanitized metrics are in [`results/paired-metrics.csv`](results/paired-metrics.csv), and the run summary is in [`results/experiment-status.md`](results/experiment-status.md). Detailed cluster and troubleshooting history is in [`results/history.md`](results/history.md).
+
+## OpenCode + Qwen3-Coder 30B follow-up
+
+The user reported that a standalone OpenCode + Qwen3-Coder 30B smoke test passed. A subsequent Harbor run on the real Awilix task reached the unchanged original verifier, but OpenCode returned an internal server error before Ollama received an inference request. No source implementation was produced, token counts were unavailable, and the actual loaded context length could not be verified. The verifier returned functional and release-preference rewards of 0.0 on the unchanged baseline; this is not a valid agent-performance result. The memory condition was skipped because A showed no source progress. Details are in [`results/opencode-awilix-status.md`](results/opencode-awilix-status.md).
 
 ## Setup and deviations
 
