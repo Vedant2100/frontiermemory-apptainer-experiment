@@ -1,0 +1,4 @@
+#!/bin/sh
+exec /host-tmux/lib64/ld-linux-x86-64.so.2 \
+  --library-path /host-tmux/lib64:/host-tmux/usr-lib64 \
+  /host-tmux/tmux "$@"

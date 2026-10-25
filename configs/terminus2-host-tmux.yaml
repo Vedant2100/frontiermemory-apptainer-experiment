@@ -1,0 +1,23 @@
+# Harbor's Terminus-2 uses tmux to run the interactive terminal. The task SIF
+# has no tmux, and cluster nodes cannot reach Debian package repositories.
+# Bind the cluster's existing tmux and libraries read-only into the agent
+# container; the wrapper uses the host loader only for that binary. Recording
+# is disabled, so asciinema is not required.
+environment:
+  mounts:
+    - type: bind
+      source: /home/csgrad/vbork001/frontiermemory-experiment-20261024/scripts/terminus2-host-tmux-wrapper
+      target: /usr/local/bin/tmux
+      read_only: true
+    - type: bind
+      source: /usr/bin/tmux
+      target: /host-tmux/tmux
+      read_only: true
+    - type: bind
+      source: /lib64
+      target: /host-tmux/lib64
+      read_only: true
+    - type: bind
+      source: /usr/lib64
+      target: /host-tmux/usr-lib64
+      read_only: true

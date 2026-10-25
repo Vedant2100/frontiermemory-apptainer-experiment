@@ -1,0 +1,8 @@
+Slurm job: 298869
+Harbor CLI process exit: 0
+Harbor trial outcome: 0 trials, 1 setup exception
+Exception: RuntimeError: Failed to start tmux session. Error: None
+Cause: the task SIF lacked tmux; Harbor's apt/source installation could not reach
+Debian/GitHub package hosts from the cluster container. This stopped before any
+model request, agent command, or task verifier run. Do not interpret exit code 0
+as a completed trial; Harbor represented this failure in its result.json.

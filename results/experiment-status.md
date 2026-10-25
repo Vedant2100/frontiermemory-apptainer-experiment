@@ -24,3 +24,15 @@ The agent behaved differently but did not solve the task. A used 24 `cat src/con
 - The generated memory, gated corpus, official task files, task verifier, model weights, raw trajectories, and raw logs remain in local storage and are not included in a GitHub publication. The gate does not permit republishing the corpus outside its gated repository; the small memory is treated as derived gated content too.
 
 Detailed setup failures, adaptations, and job IDs are in `history.md`.
+
+## Additional diagnostic experiments and stronger memory candidates
+
+| Run | Setup | Result | Interpretation |
+|---|---|---|---|
+| Terminus-2 no-memory, 298869 | Harbor 0.24, local Qwen2.5-Coder 7B Q4, RTX 2080 Ti | Setup exception before model call: task SIF lacked tmux; package installation could not reach the network. | Infrastructure failure, not an agent result. |
+| Terminus-2 no-memory, 298878 | Same task/model/node; host tmux bound read-only into the Apptainer agent container; recording disabled | Early-stopped after 9 turns and 18 shell actions. Repeated `ls -la` 9 times and an unresolved placeholder `cd` 8 times. 38,422 prompt / 1,882 completion tokens. No useful edits, tests, or verifier run. | Terminus-2 with the same 7B model also looped. This argues against Mini-SWE-Agent being the sole cause, but does not isolate model from parser/harness behavior. |
+| OpenCode smoke, 298840 | OpenCode without Harbor, Qwen3-Coder 30B Q4, RTX 6000 Ada queue | Pending for resources; scheduler's current estimate is 2026-10-25 03:27:25. | No smoke-test result yet; the Awilix OpenCode run remains gated on this coding smoke test succeeding. |
+
+The Terminus job used the official task through the existing local Apptainer staging copy and did not modify benchmark task/verifier files. Its first attempt confirmed that Harbor's default Terminus setup tries to install tmux/asciinema inside the SIF; the second used a read-only host-tool bind and successfully began agent turns. Full trial details and limits are in `results/terminus2-awilix-298878-status.txt` and `history.md`.
+
+The CPU corpus review produced 14 human-curated, evidence-backed memory candidates from 10 successful Mini-SWE ATIF trajectories. The local artifact is `data/evidence-backed-memories.md`; it is intentionally Git-ignored because the official corpus card restricts republishing corpus derivatives outside its gated repository. The filter excluded two raw corpus files matching the user-supplied evaluation task/repository markers before parsing. The corpus has no filename-to-task mapping, so semantic overlap beyond those marker matches cannot be ruled out. The review used no model and makes no causal/pass-rate claim.

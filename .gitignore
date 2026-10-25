@@ -2,6 +2,7 @@
 /data/corpus/
 /data/tasks/
 /data/evidence-summary.md
+/data/evidence-backed-memories.md
 /memory/
 /results/memory-generation-*/memory/
 /results/memory-generation-*/
