@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Create B's memory prompt and Harbor config from the no-memory config."""
+"""Render a shared OpenCode task prompt and Harbor config for either condition.
+
+The prompt wrapper is byte-identical across conditions. A leaves the memory
+slot empty; B fills only that slot with the frozen historical memory.
+"""
 
 from __future__ import annotations
 
@@ -12,16 +16,16 @@ import yaml
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-config", type=Path, required=True)
-    parser.add_argument("--memory", type=Path, required=True)
+    parser.add_argument("--memory", type=Path)
     parser.add_argument("--prompt-template", type=Path, required=True)
     parser.add_argument("--output-config", type=Path, required=True)
     args = parser.parse_args()
 
-    memory = args.memory.read_text(encoding="utf-8").strip()
-    if not memory:
-        raise ValueError("Memory file is empty")
+    memory = args.memory.read_text(encoding="utf-8").strip() if args.memory else ""
     safe_memory = memory.replace("{{", "{ {").replace("}}", "} }")
     template = (
+        "Work in the task repository at /app (the current working directory). "
+        "Use repository-relative paths for reads and edits.\n\n"
         "The following reusable memory was distilled only from historical "
         "FrontierMemory trajectory evidence. Treat it as guidance, not as a "
         "specification; follow the current task's requirements.\n\n"
@@ -39,7 +43,8 @@ def main() -> int:
     )
     args.output_config.parent.mkdir(parents=True, exist_ok=True)
     args.output_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    print(f"Wrote B config: {args.output_config}")
+    condition = "B" if args.memory else "A"
+    print(f"Wrote {condition} config: {args.output_config}")
     return 0
 
 

@@ -6,7 +6,16 @@ FM_EXPERIMENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ "${1:-}" == "exec" ]]; then
   shift
   FM_UV_ROOT="${FM_EXPERIMENT_ROOT}/runtime/uv"
+  FM_HARBOR_WHEELHOUSE="${FM_EXPERIMENT_ROOT}/runtime/harbor-server-wheelhouse"
   FM_BIND_ARGS=()
+  FM_PIP_ARGS=()
+  if [[ -d "${FM_HARBOR_WHEELHOUSE}" ]]; then
+    FM_BIND_ARGS+=(--bind "${FM_HARBOR_WHEELHOUSE}:/tmp/fm-harbor-wheelhouse:ro")
+    FM_PIP_ARGS+=(
+      --env PIP_FIND_LINKS=/tmp/fm-harbor-wheelhouse
+      --env PIP_NO_INDEX=1
+    )
+  fi
   if [[ "${FM_BIND_EVIDENCE_SUMMARY:-0}" == "1" ]]; then
     FM_EVIDENCE_SUMMARY="${FM_EXPERIMENT_ROOT}/data/evidence-summary.md"
     [[ -s "${FM_EVIDENCE_SUMMARY}" ]] || {
@@ -17,6 +26,7 @@ if [[ "${1:-}" == "exec" ]]; then
   fi
   exec apptainer exec \
     "${FM_BIND_ARGS[@]}" \
+    "${FM_PIP_ARGS[@]}" \
     --bind "${FM_UV_ROOT}:${FM_UV_ROOT}:rw" \
     --env PATH="${FM_UV_ROOT}/bin:${FM_UV_ROOT}/tool-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     --env UV_CACHE_DIR="${FM_UV_ROOT}/cache" \

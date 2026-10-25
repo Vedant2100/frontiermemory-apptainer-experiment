@@ -1,0 +1,23 @@
+Bootstrap: localimage
+From: /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/frontier-memory-cookie-store.sif
+
+# Restore the repository's original test tree and Git tree at task base commit
+# b5addb64f0161ff6bfe94c124ef76f6a1fba5254. The task image omits these files.
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/runtime/httpx-cookie-store-source/.git /app/.git
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/runtime/httpx-cookie-store-source/tests /app/tests
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/cookie-store-compositional-changelog/tests /tests
+
+%post
+    set -eu
+    test "$(git -C /app rev-parse HEAD)" = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+    git -C /app cat-file -e HEAD:tests/conftest.py
+    test -f /app/tests/conftest.py
+    test -f /tests/test.sh
+    chmod +x /tests/test.sh
+    grep -q '^agent:' /etc/passwd || printf '%s\n' 'agent:x:10001:10001:Harbor agent:/home/agent:/bin/sh' >> /etc/passwd
+    grep -q '^agent:' /etc/group || printf '%s\n' 'agent:x:10001:' >> /etc/group
+    mkdir -p /home/agent
+    chown 10001:10001 /home/agent
+    mkdir -p /logs/verifier
+    chmod 700 /logs/verifier

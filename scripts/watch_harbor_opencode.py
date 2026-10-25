@@ -1,52 +1,229 @@
 #!/usr/bin/env python3
-"""Watch Harbor's live OpenCode event file and stop repeated shell loops."""
+"""Stop repeated OpenCode tool loops while leaving Harbor to verify the work."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
 import sys
 import time
-from collections import Counter
 from pathlib import Path
+from typing import Any
 
 
 def find_event_file(jobs_dir: Path, job_name: str) -> Path | None:
     matches = list(jobs_dir.glob(f"{job_name}/**/agent/opencode.txt"))
-    if not matches:
+    return max(matches, key=lambda path: path.stat().st_mtime) if matches else None
+
+
+def parse_event(line: str) -> dict[str, Any] | None:
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
         return None
-    return max(matches, key=lambda path: path.stat().st_mtime)
+    if event.get("type") != "tool_use":
+        return None
+    part = event.get("part") or {}
+    tool = str(part.get("tool", "")).lower()
+    if not tool:
+        return None
+    state = part.get("state") or {}
+    call_input = state.get("input") or {}
+    output = state.get("output")
+    if output is None:
+        output = (state.get("metadata") or {}).get("output", "")
+    return {
+        "tool": tool,
+        "input": call_input,
+        "status": state.get("status", ""),
+        "output": str(output),
+        "error": str(state.get("error") or ""),
+    }
 
 
-def parse_shell_calls(path: Path) -> list[tuple[str, str]]:
-    calls: list[tuple[str, str]] = []
+def parse_tool_calls(path: Path) -> list[dict[str, Any]]:
     try:
         lines = path.read_text(errors="replace").splitlines()
     except OSError:
-        return calls
-
+        return []
+    calls = []
     for line in lines:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if event.get("type") != "tool_use":
-            continue
-        part = event.get("part") or {}
-        if str(part.get("tool", "")).lower() not in {"bash", "shell"}:
-            continue
-        state = part.get("state") or {}
-        call_input = state.get("input") or {}
-        command = call_input.get("command") or call_input.get("cmd")
-        if not isinstance(command, str) or not command.strip():
-            continue
-        output = state.get("output")
-        if output is None:
-            output = (state.get("metadata") or {}).get("output", "")
-        calls.append((" ".join(command.split()), str(output)))
+        call = parse_event(line)
+        if call is not None:
+            calls.append(call)
     return calls
+
+
+def reason_for_repeated_operation(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    eligible = {"bash", "shell", "read", "grep"}
+    recent = [call for call in calls[-10:] if call["tool"] in eligible]
+    counts: dict[str, tuple[dict[str, Any], int]] = {}
+    for call in recent:
+        tool_input = call["input"] or {}
+        if call["tool"] in {"bash", "shell"}:
+            command = " ".join(
+                str(tool_input.get("command") or tool_input.get("cmd") or "").split()
+            )
+            normalized_input: Any = {"command": command}
+        else:
+            normalized_input = tool_input
+        signature = json.dumps(
+            [call["tool"], normalized_input, call["output"]],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        previous = counts.get(signature)
+        counts[signature] = (call, (previous[1] if previous else 0) + 1)
+    for signature, (call, count) in counts.items():
+        if count >= 4:
+            return {
+                "reason": "same shell, read, or search operation and output repeated at least four times in the last ten calls",
+                "tool": call["tool"],
+                "operation_hash": hashlib.sha256(signature.encode()).hexdigest()[:12],
+                "repetitions": count,
+            }
+    return None
+
+
+def reason_for_repeated_tool_error(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    recent_errors = [call for call in calls[-8:] if call["status"] == "error"]
+    counts: dict[str, tuple[dict[str, Any], int]] = {}
+    for call in recent_errors:
+        signature = json.dumps([call["error"]], separators=(",", ":"))
+        previous = counts.get(signature)
+        counts[signature] = (call, (previous[1] if previous else 0) + 1)
+    for signature, (call, count) in counts.items():
+        if count >= 3:
+            return {
+                "reason": "the same tool error occurred at least three times in the last eight calls",
+                "tool": call["tool"],
+                "operation_hash": hashlib.sha256(signature.encode()).hexdigest()[:12],
+                "repetitions": count,
+            }
+    return None
+
+
+def reason_for_repeated_edit_failure(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    edits = [call for call in calls if call["tool"] in {"edit", "apply_patch"}][-8:]
+    failed = [call for call in edits if call["status"] == "error"]
+    counts: dict[str, tuple[dict[str, Any], int]] = {}
+    for call in failed:
+        signature = json.dumps(
+            [call["tool"], (call["input"] or {}).get("filePath"), call["error"]],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        previous = counts.get(signature)
+        counts[signature] = (call, (previous[1] if previous else 0) + 1)
+    for signature, (call, count) in counts.items():
+        if count >= 3:
+            return {
+                "reason": "the same edit operation failed at least three times in the last eight edit attempts",
+                "tool": call["tool"],
+                "operation_hash": hashlib.sha256(signature.encode()).hexdigest()[:12],
+                "repetitions": count,
+            }
+    return None
+
+
+def proc_record(pid: int) -> tuple[int, str, list[str]] | None:
+    try:
+        raw_stat = Path(f"/proc/{pid}/stat").read_text()
+        end_of_comm = raw_stat.rfind(")")
+        fields = raw_stat[end_of_comm + 2 :].split()
+        state = fields[0]
+        parent_pid = int(fields[1])
+        argv = [
+            item.decode(errors="replace")
+            for item in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            if item
+        ]
+    except (OSError, IndexError, ValueError):
+        return None
+    return parent_pid, state, argv
+
+
+def is_opencode_command(argv: list[str]) -> bool:
+    if not argv:
+        return False
+    executable = Path(argv[0]).name
+    if executable == "opencode":
+        return True
+    is_node = executable in {"node", "nodejs"}
+    return is_node and any(
+        Path(arg).name in {"opencode", "opencode.mjs"} for arg in argv[1:3]
+    )
+
+
+def find_opencode_pid(harbor_pid: int) -> int | None:
+    records: dict[int, tuple[int, str, list[str]]] = {}
+    for stat_path in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            pid = int(stat_path.parent.name)
+        except ValueError:
+            continue
+        record = proc_record(pid)
+        if record is not None:
+            records[pid] = record
+
+    children: dict[int, list[int]] = {}
+    for pid, (parent_pid, _, _) in records.items():
+        children.setdefault(parent_pid, []).append(pid)
+    pending = list(children.get(harbor_pid, []))
+    descendants = []
+    while pending:
+        pid = pending.pop()
+        descendants.append(pid)
+        pending.extend(children.get(pid, []))
+
+    for pid in reversed(descendants):
+        if is_opencode_command(records[pid][2]):
+            return pid
+    return None
+
+
+def interrupt_process(pid: int, sig: signal.Signals, timeout: float) -> bool:
+    try:
+        os.kill(pid, sig)
+    except OSError:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        record = proc_record(pid)
+        if record is None or record[1] == "Z":
+            return True
+        time.sleep(0.25)
+    record = proc_record(pid)
+    return record is None or record[1] == "Z"
+
+
+def stop_opencode(harbor_pid: int) -> bool:
+    opencode_pid = find_opencode_pid(harbor_pid)
+    if opencode_pid is None:
+        return False
+    if interrupt_process(opencode_pid, signal.SIGINT, 20):
+        return True
+    if interrupt_process(opencode_pid, signal.SIGTERM, 5):
+        return True
+    return interrupt_process(opencode_pid, signal.SIGKILL, 1)
+
+
+def stop_reason(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    detectors = (
+        reason_for_repeated_operation,
+        reason_for_repeated_tool_error,
+        reason_for_repeated_edit_failure,
+    )
+    for detector in detectors:
+        reason = detector(calls)
+        if reason is not None:
+            return reason
+    return None
 
 
 def main() -> int:
@@ -58,54 +235,31 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=15.0)
     args = parser.parse_args()
 
-    seen_file: Path | None = None
     previous_count = 0
     while True:
-        try:
-            os.kill(args.harbor_pid, 0)
-        except OSError:
+        harbor = proc_record(args.harbor_pid)
+        if harbor is None or harbor[1] == "Z":
             return 0
-
         event_file = find_event_file(args.jobs_dir, args.job_name)
         if event_file is not None:
-            calls = parse_shell_calls(event_file)
-            if event_file != seen_file or len(calls) != previous_count:
+            calls = parse_tool_calls(event_file)
+            if len(calls) != previous_count:
                 print(
                     f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} "
-                    f"events={event_file} shell_calls={len(calls)}",
+                    f"events={event_file} tool_calls={len(calls)}",
                     flush=True,
                 )
-                seen_file = event_file
                 previous_count = len(calls)
-
-            recent = calls[-10:]
-            command_counts = Counter(command for command, _ in recent)
-            for command, count in command_counts.items():
-                if count < 4:
-                    continue
-                outputs = [output for candidate, output in recent if candidate == command]
-                if len(set(outputs)) != 1:
-                    continue
-                reason = {
-                    "reason": "same shell command and output repeated at least four times in the last ten shell calls",
-                    "command": command,
-                    "repetitions": count,
-                    "event_file": str(event_file),
-                    "observed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                }
+            reason = stop_reason(calls)
+            if reason is not None:
+                reason.update(
+                    event_file=str(event_file),
+                    observed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    opencode_interrupted=stop_opencode(args.harbor_pid),
+                )
                 args.marker.parent.mkdir(parents=True, exist_ok=True)
                 args.marker.write_text(json.dumps(reason, indent=2) + "\n")
                 print(json.dumps(reason), flush=True)
-                try:
-                    os.kill(args.harbor_pid, signal.SIGINT)
-                    time.sleep(20)
-                    os.kill(args.harbor_pid, 0)
-                except OSError:
-                    return 0
-                try:
-                    os.kill(args.harbor_pid, signal.SIGTERM)
-                except OSError:
-                    pass
                 return 0
         time.sleep(args.interval)
 

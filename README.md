@@ -15,7 +15,9 @@ Full sanitized metrics are in [`results/paired-metrics.csv`](results/paired-metr
 
 ## OpenCode + Qwen3-Coder 30B follow-up
 
-The user reported that a standalone OpenCode + Qwen3-Coder 30B smoke test passed. A subsequent Harbor run on the real Awilix task reached the unchanged original verifier, but OpenCode returned an internal server error before Ollama received an inference request. No source implementation was produced, token counts were unavailable, and the actual loaded context length could not be verified. The verifier returned functional and release-preference rewards of 0.0 on the unchanged baseline; this is not a valid agent-performance result. The memory condition was skipped because A showed no source progress. Details are in [`results/opencode-awilix-status.md`](results/opencode-awilix-status.md).
+An early Harbor + OpenCode attempt failed before Ollama received an inference request; details are in [`results/opencode-awilix-status.md`](results/opencode-awilix-status.md). After fixing local model discovery, a later Awilix A/B pair ran on an RTX 3090 with the loaded 30B Q4 model at 32K context. Both conditions reached the unchanged verifier and scored 0. The agents behaved differently, but neither solved the task; the detailed results are in the same status report.
+
+Two additional official FrontierMemory v1.0 tasks were then run with the same OpenCode, Ollama, and Apptainer stack. The cattrs A/B verifier pair scored 0 in both conditions; A made edits but did not commit them, while B stopped early after repeated tool errors. Cookie-store agents made edits, but both verifier attempts failed before producing scores because the runtime verifier workspace lacked an upstream test fixture. See [`results/additional-opencode-frontiermemory-evaluation.md`](results/additional-opencode-frontiermemory-evaluation.md) for the sanitized metrics and [`results/history.md`](results/history.md) for setup and troubleshooting details. These are exploratory diagnostics, not leaderboard results.
 
 ## Setup and deviations
 
@@ -42,5 +44,7 @@ The gated benchmark source and model weights are not distributed here. Obtain ac
 
    The generated `configs/mini-swe-ollama-7b-memory.yaml` is intentionally ignored by Git.
 5. Run the paired Slurm script with `sbatch slurm/run-awilix-ab.sbatch`. Update its cluster-specific absolute paths if installing elsewhere. It starts Ollama once and runs A then B sequentially.
+
+For the later OpenCode runs, use `scripts/stage_frontiermemory_task_for_apptainer.py` to create a local staged task copy, `slurm/build-frontiermemory-verifier-images.sbatch` for the task-specific verifier SIFs, and `slurm/run-opencode-frontiermemory-tasks.sbatch` for the OpenCode A/B runs. These scripts document the local image paths and preserve the downloaded task/verifier sources. The cookie-store verifier workspace mismatch remains unresolved, so those two verifier outcomes are not valid task scores.
 
 Raw gated corpus files, task/verifier files, derived memory, model weights, raw trajectories, tool runtimes, and unfiltered logs are intentionally excluded from this repository. They remain in the local experiment workspace under the relevant access restrictions.

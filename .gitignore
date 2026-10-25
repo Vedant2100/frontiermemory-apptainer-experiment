@@ -7,6 +7,8 @@
 /results/memory-generation-*/memory/
 /results/memory-generation-*/
 /results/opencode-awilix-*/
+/results/opencode-frontiermemory-*/
+/results/frozen-memory-v1/
 /results/target-task-source-sha256.txt
 /results/ollama-*
 /results/awilix-ab-*-harbor-exits.txt
