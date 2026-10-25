@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=fm-awilix-opencode-ab
-#SBATCH --partition=gpu
-#SBATCH --constraint=a6000ada
+#SBATCH --partition=vcggpu
+#SBATCH --constraint=rtx3090
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
@@ -14,7 +14,7 @@ cd /home/csgrad/vbork001/frontiermemory-experiment-20261024
 
 export PATH="${PWD}/bin:${PATH}"
 export APPTAINER_CACHEDIR="${PWD}/containers/apptainer-cache"
-export OLLAMA_CONTEXT_LENGTH=65536
+export OLLAMA_CONTEXT_LENGTH=32768
 export OLLAMA_KEEP_ALIVE=20m
 export OLLAMA_HOST=127.0.0.1:11434
 export OLLAMA_MODELS=/models
@@ -33,7 +33,7 @@ date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
 scontrol show job "${SLURM_JOB_ID}" >"${RUN_DIR}/slurm-job.txt"
 nvidia-smi -q >"${RUN_DIR}/nvidia-smi.txt"
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv >"${RUN_DIR}/gpu.csv"
-grep -q 'RTX 6000 Ada' "${RUN_DIR}/gpu.csv"
+grep -q 'GeForce RTX 3090' "${RUN_DIR}/gpu.csv"
 .venv/bin/harbor --version >"${RUN_DIR}/harbor-version.txt"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
 apptainer exec --fakeroot "${OLLAMA_SIF}" ollama --version >"${RUN_DIR}/ollama-version.txt" 2>&1
