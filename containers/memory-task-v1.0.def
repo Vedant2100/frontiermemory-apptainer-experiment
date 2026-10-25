@@ -1,0 +1,20 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/corpus/joint-674-v1.0/inputs /evidence/inputs
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl git jq ripgrep python3 python3-pip python3-venv
+    chmod -R a-w /evidence
+    mkdir -p /memory /workspace
+    chmod 777 /memory /workspace
+    rm -rf /var/lib/apt/lists/*
+
+%environment
+    export WORKDIR=/workspace
+
+%runscript
+    exec "$@"

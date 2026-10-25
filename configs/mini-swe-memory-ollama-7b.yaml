@@ -1,0 +1,77 @@
+agent:
+  system_template: |
+    You are FrontierMemory's memory-consolidation agent. Read
+    /tmp/frontiermemory-corpus-summary.md, then write reusable guidance to
+    /memory/MEMORY.md for a future coding agent.
+
+    The summary was deterministically extracted from all 674 official historical
+    trajectories. It contains corpus-wide counts, ordered command sketches from
+    10 files, and a separate profile of 100 Mini-SWE-Agent histories. It omits
+    conversation text, code, task names, paths, arguments, and answers. The
+    corpus card says file names are opaque and provides no map to tasks. Do not
+    claim the sample represents distinct tasks. The Mini-SWE subset has only
+    passing verifier markers; frequencies do not show what caused a pass.
+
+    Write memory useful to a coding agent, not a guide to memory consolidation.
+    Include at least 5 sections and exactly 8 numbered practices. Every practice
+    must cite an exact Mini-SWE command-family frequency from the summary as
+    evidence (for example, X/100 histories). Mention only command names listed
+    there. Do not invent flags, subcommands, or utilities. Do not claim a
+    frequent action caused success; state appropriate limits. Do not guess the
+    withheld target task or include task-specific solutions.
+
+    Save substantive Markdown at /memory/MEMORY.md, at least 800 bytes and under
+    8 MiB. Do not create output outside /memory or use network. Read the summary,
+    write the memory, then read it back and verify it. Each response must give a
+    brief plan and exactly one bash tool call using `command`. Do not use a
+    completion sentinel.
+  instance_template: |
+    Use the compact evidence file to write evidence-linked coding practices from
+    the official historical corpus. Follow the output requirements above.
+
+    Official FrontierMemory task instructions:
+    {{task}}
+  step_limit: 8
+  cost_limit: 3.0
+  mode: confirm
+environment:
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+model:
+  model_kwargs:
+    api_base: http://127.0.0.1:11434
+    temperature: 0
+    drop_params: true
+  observation_template: |
+    {%- if output.output | length < 10000 -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output": {{ output.output | tojson }}
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- else -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output_head": {{ output.output[:5000] | tojson }},
+      "output_tail": {{ output.output[-5000:] | tojson }},
+      "elided_chars": {{ output.output | length - 10000 }},
+      "warning": "Output too long."
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- endif %}
+  format_error_template: |
+    {% if finish_reason is defined and (finish_reason == "length" or (finish_reason == "tool_calls" and not has_tool_calls)) -%}
+    Your previous response reached the output token limit (finish_reason={{ finish_reason }}) before making a bash tool call. Respond more concisely and make exactly one bash tool call.
+    {%- else -%}
+    Tool call error:
+
+    <error>
+    {{error}}
+    </error>
+
+    Use one bash tool call with the command argument. Continue from the current evidence inventory and do not fabricate findings.
+    {%- endif %}

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+FM_EXPERIMENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ "${1:-}" == "exec" ]]; then
+  shift
+  FM_UV_ROOT="${FM_EXPERIMENT_ROOT}/runtime/uv"
+  FM_BIND_ARGS=()
+  if [[ "${FM_BIND_EVIDENCE_SUMMARY:-0}" == "1" ]]; then
+    FM_EVIDENCE_SUMMARY="${FM_EXPERIMENT_ROOT}/data/evidence-summary.md"
+    [[ -s "${FM_EVIDENCE_SUMMARY}" ]] || {
+      echo "Missing compact corpus evidence: ${FM_EVIDENCE_SUMMARY}" >&2
+      exit 2
+    }
+    FM_BIND_ARGS+=(--bind "${FM_EVIDENCE_SUMMARY}:/tmp/frontiermemory-corpus-summary.md:ro")
+  fi
+  exec apptainer exec \
+    "${FM_BIND_ARGS[@]}" \
+    --bind "${FM_UV_ROOT}:${FM_UV_ROOT}:rw" \
+    --env PATH="${FM_UV_ROOT}/bin:${FM_UV_ROOT}/tool-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    --env UV_CACHE_DIR="${FM_UV_ROOT}/cache" \
+    --env UV_PYTHON_INSTALL_DIR="${FM_UV_ROOT}/python" \
+    --env UV_TOOL_DIR="${FM_UV_ROOT}/tools" \
+    --env UV_TOOL_BIN_DIR="${FM_UV_ROOT}/tool-bin" \
+    --env UV_PYTHON_BIN_DIR="${FM_UV_ROOT}/bin" \
+    --env UV_OFFLINE=true \
+    --env XDG_CONFIG_HOME=/tmp/frontiermemory-agent-config \
+    --env XDG_CACHE_HOME=/tmp/frontiermemory-agent-cache \
+    --env XDG_DATA_HOME=/tmp/frontiermemory-agent-data \
+    --env MSWEA_GLOBAL_CONFIG_DIR=/tmp/frontiermemory-agent-config/mswe \
+    --env MSWEA_SILENT_STARTUP=1 \
+    "$@"
+fi
+
+exec apptainer "$@"

@@ -1,0 +1,7 @@
+Bootstrap: localimage
+From: /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/awilix-release-tier-implicit.sif
+
+%post
+    set -eu
+    python3 -m venv /opt/harbor-server
+    /opt/harbor-server/bin/python3 -m pip install --no-cache-dir fastapi uvicorn

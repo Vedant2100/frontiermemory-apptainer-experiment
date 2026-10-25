@@ -1,0 +1,20 @@
+# Condition B: same Mini-SWE-Agent and local model as condition A, with the
+# accepted corpus-derived MEMORY.md injected into the system prompt.
+model:
+  model_name: ollama/qwen2.5-coder:7b
+  model_kwargs:
+    api_base: http://127.0.0.1:11434
+    temperature: 0
+  cost_tracking: ignore_errors
+agent:
+  # Match A's explicit cap; Mini-SWE's default is unlimited.
+  step_limit: 50
+  system_template: |
+    You are a helpful assistant that can interact with a computer.
+
+    The following optional memory was generated from official FrontierMemory
+    v1.0 historical trajectories using the same local model. Counts describe
+    prevalence, not causality; use only where relevant to the current repository.
+
+    # Insert your locally generated, gated-corpus memory below this marker.
+    {{LOCAL_MEMORY}}

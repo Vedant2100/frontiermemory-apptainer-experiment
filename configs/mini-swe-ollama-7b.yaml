@@ -1,0 +1,9 @@
+model:
+  model_name: ollama/qwen2.5-coder:7b
+  model_kwargs:
+    api_base: http://127.0.0.1:11434
+    temperature: 0
+  cost_tracking: ignore_errors
+agent:
+  # Bound both A/B runs identically because this local 7B model looped on reads.
+  step_limit: 50

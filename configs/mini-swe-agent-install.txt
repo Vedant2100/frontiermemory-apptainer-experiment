@@ -1,0 +1,17 @@
+Offline task-container provisioning for Harbor's Mini-SWE-Agent integration
+
+uv: 0.12.22 (uv binary: runtime/uv/bin/uv.real)
+Managed CPython: 3.12.15
+Mini-SWE-Agent: 2.4.6
+LiteLLM: 1.106.3
+LiteLLM MCP extra: mcp>=2.2.0,<3 (resolved to mcp 2.3.0)
+
+Harbor's install command is:
+  uv python install 3.12
+  uv tool install --python 3.12 mini-swe-agent==2.4.6 --with litellm --with orjson --with fastapi
+
+The experiment-local runtime/uv/bin/uv wrapper appends LiteLLM's declared MCP
+extra to `uv tool install`, because the installed LiteLLM version imports its
+MCP handler for Mini-SWE's bash tool. `UV_OFFLINE=true` makes this command use
+only the already provisioned environment. Exact resolved packages are listed in
+mini-swe-agent-requirements.lock.

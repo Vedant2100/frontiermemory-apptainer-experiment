@@ -1,0 +1,23 @@
+Bootstrap: localimage
+From: /home/csgrad/vbork001/fleet-mem-benchmark/artifacts/pilot/environment/pycqa-docformatter-141.sif
+
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/corpus/joint-674-v1.0/inputs /evidence/inputs
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/memory-task-wheelhouse /opt/harbor-wheelhouse
+
+%post
+    mkdir -p /memory /workspace
+    ln -sf /usr/local/bin/python3 /usr/bin/python3
+    mkdir -p /usr/local/lib/python3.10/site-packages
+    for wheel in /opt/harbor-wheelhouse/*.whl; do
+        /usr/local/bin/python3 -m zipfile -e "$wheel" /usr/local/lib/python3.10/site-packages
+    done
+    chmod -R a-w /evidence
+    chmod 777 /memory /workspace
+
+%environment
+    export WORKDIR=/workspace
+    export PYTHONPATH=/usr/local/lib/python3.10/site-packages
+
+%runscript
+    exec "$@"

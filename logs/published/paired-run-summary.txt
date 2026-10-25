@@ -1,0 +1,11 @@
+Sanitized final run summary
+Date: 2026-10-24 (UTC logs roll into 2026-10-25)
+Slurm job: 298814; state COMPLETED; elapsed 00:04:32; exit 0:0
+GPU: NVIDIA GeForce RTX 2080 Ti, 10.6 GiB total VRAM
+Inference: Ollama 0.40.11, qwen2.5-coder:7b (Q4), local endpoint, cost $0
+Agent: Mini-SWE-Agent 2.4.6; Harbor 0.24.0
+Task: official FrontierMemory v1.0 awilix-release-tier-implicit (source/verifier hashes checked locally)
+A: reward 0.0; 50 model calls; 49 shell actions; 196352 input / 962 output tokens; 78.887s agent / 134.204s whole trial
+B: reward 0.0; 50 model calls; 49 shell actions; 311123 input / 1164 output tokens; 51.318s agent / 106.183s whole trial
+Both original verifier runs completed and failed. Both agents reached the shared 50-call limit.
+No raw prompts, task source, verifier contents, trajectory files, memory text, or credentials are included in this summary.

@@ -1,0 +1,21 @@
+Bootstrap: docker
+From: public.ecr.aws/x8v8d7g8/mars-base@sha256:91db850db926024eed328c4bf519d54986bc10aad75302cbb074f8e9d79b4c46
+
+%post
+    set -eu
+    mkdir -p /app
+    cd /app
+    git clone https://github.com/jeffijoe/awilix .
+    git checkout 82ac179c1de4c216c4e333093044fac643303f0c
+    (git submodule update --init --recursive || true)
+    mkdir -p .changes \
+        && printf 'internal_release_tier: 7\n' > .changes/awilix.yaml \
+        && git add .changes/awilix.yaml \
+        && GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' \
+           GIT_COMMITTER_DATE='2026-01-01T00:00:00Z' \
+           git -c user.name='Frontier Memory Fixture' \
+               -c user.email='fixture@frontier-memory.local' \
+               -c core.hooksPath=/dev/null \
+               commit -m 'Add release metadata fixture' \
+        && git tag -f frontier-memory-task-base
+    npm install --include=dev

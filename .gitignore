@@ -1,0 +1,32 @@
+# Gated source data and derivative artifacts (do not republish outside HF).
+/data/corpus/
+/data/tasks/
+/data/evidence-summary.md
+/memory/
+/results/memory-generation-*/memory/
+/results/memory-generation-*/
+/results/target-task-source-sha256.txt
+/results/ollama-*
+/results/awilix-ab-*-harbor-exits.txt
+
+# Cluster-only environments, caches, model files, and generated task copies.
+/.venv/
+/runtime/
+/models/
+/frontiermemory/
+/jobs/
+/build/
+/containers/*.sif
+/containers/apptainer-cache/
+/containers/memory-task-wheelhouse/
+__pycache__/
+*.py[cod]
+
+# Raw logs may include full prompts, gated-data excerpts, or signed URLs.
+/logs/*
+!/logs/published/
+!/logs/published/**
+
+# This exact config contains the corpus-derived memory text. Publish only a
+# placeholder template, never this generated artifact.
+/configs/mini-swe-ollama-7b-memory.yaml
