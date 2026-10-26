@@ -74,8 +74,29 @@ the separate Apptainer verifier through the existing Harbor collector.
 
 Harbor recorded 77,389 input, 37,999 cached, and 1,645 output tokens. The
 trajectory had no reasoning blocks and the 8,192 output ceiling was not hit.
-This is a genuine no-progress task outcome, not a verifier or patch-collection
-failure.
+The unchanged verifier and patch collector worked, but this was stopped by a
+no-progress guard after eight assistant turns, so it is a guard-censored
+no-progress observation rather than evidence that the model could never solve
+the task.
+
+### Trace diagnosis: compaction loses task state
+
+The corrected OpenCode trace exposes a concrete failure mode. After reading the
+large `converters.py` file, the next request reached 27,417 prompt tokens. The
+OpenCode log then records `agent=compaction mode=primary`. The compaction summary
+incorrectly says no branch has been created, even though the immediately prior
+tool output confirms `git checkout -b partial-structure` succeeded. It then
+directs the agent to reread the full converter file. The next actions resume
+repository inspection and the shared eight-turn guard stops the attempt before
+an edit or test. Earlier A1 shows the same read/compaction/inspection cycle
+repeated over many turns.
+
+This is a model-and-context-management interaction, not an Ollama context
+overflow or failed tool call: the loaded context was 32,768, and the tool
+outputs show successful reads and branch creation. Large whole-file reads
+triggered compaction; the generated summary then discarded true execution state
+and encouraged rereading. The eight-turn stop policy further prevents these
+runs from testing whether implementation would eventually begin.
 
 ## OpenHands SDK attempt
 
@@ -118,11 +139,12 @@ were byte-identical in the fresh task copy. Only that copy's `task.toml` has
 the documented Apptainer/network/collector adaptations.
 
 This establishes that the Harbor adapter, Apptainer bind, Ollama-compatible
-endpoint, and OpenHands native tools execute together. It is a genuine
-no-progress task result with a valid original verifier score, not an
-infrastructure failure. LiteLLM's optional remote model-cost-map refresh logged
-DNS warnings and used its bundled local fallback; model calls still succeeded
-at zero cost. The earlier failed OpenHands job is setup-only and excluded.
+endpoint, and OpenHands native tools execute together. The verifier ran and
+returned a valid score for the empty patch, but the agent result is censored by
+the eight-iteration limit; it is not evidence that a longer attempt would also
+make no progress. LiteLLM's optional remote model-cost-map refresh logged DNS
+warnings and used its bundled local fallback; model calls still succeeded at
+zero cost. The earlier failed OpenHands job is setup-only and excluded.
 
 ## Assessment
 
@@ -133,15 +155,19 @@ at zero cost. The earlier failed OpenHands job is setup-only and excluded.
 - **Thinking/output use:** A real contributor to the earlier A2 failure. The
   default medium mode used the entire 8,192-token turn for reasoning. The
   corrected OpenCode config produced no reasoning blocks in the canary or
-  cattrs trajectory. Pi was configured with thinking off too; its completed
-  API calls reported zero reasoning tokens, though its final generation was
-  interrupted before a final usage record was available.
+  cattrs trajectory. Pi was configured with thinking off, but its saved session
+  contradicts treating that setting or `usage.reasoning=0` as proof: all seven
+  completed assistant turns contain explicit `thinking` blocks (22,418
+  characters total); one turn contains 21,088 such characters and reports
+  4,986 output tokens. The client/server request path needs verification before
+  claiming that Pi's reasoning was disabled. Its interrupted final generation
+  has no final usage record.
 - **Task progress:** Corrected OpenCode, Pi, and OpenHands all stopped before a
-  cattrs source edit. OpenHands reached its eight-iteration cap in 43 seconds;
-  Pi was manually stopped after a much longer inspection-only run. This pattern
-  is consistent with weak task planning or excessive inspection in this local
-  model-agent setup, but does not isolate model reasoning from harness prompts
-  or orchestration.
+  cattrs source edit. OpenCode's no-progress guard and OpenHands' iteration cap
+  both stopped at eight; Pi was manually stopped while its eighth response was
+  still generating. These are censored attempts. The repeat-inspection pattern
+  is consistent with weak task planning, compaction state loss, or a shared
+  prompt/pacing problem, but does not isolate model capability.
 - **OpenHands comparison:** Now measured as one no-memory run, not a causal
   harness comparison. Its SDK, native tools, and Ollama endpoint worked in
   Apptainer, but it also produced an empty patch and verifier 0/70. The reused
@@ -158,13 +184,16 @@ at zero cost. The earlier failed OpenHands job is setup-only and excluded.
 
 For future memory experiments, OpenCode 1.19.4 remains the best operational
 choice: its corrected no-thinking config and collector/verifier path are
-simpler, and its edit/test canary passed. Use the same Qwen3.8 Q4 model, 32K
-context, and bounded eight-turn/no-progress settings. However, no harness has
-yet demonstrated cattrs implementation progress, so do not treat any of these
-as a competent task-level baseline or start a memory A/B yet. OpenHands is now
-available for further comparison without an image rebuild; it is not currently
-better based on this one no-memory attempt. Pi's canary proves tool execution,
-not benchmark-task coding ability.
+simpler, and its edit/test canary passed. The cattrs runs do not establish a
+reliable coding baseline: the model did not edit before an eight-turn stop, and
+OpenCode compaction demonstrably lost branch state after a large file read.
+Before another memory comparison, use a harness-neutral prompt, cap source reads
+to relevant slices, require a concrete implementation plan/edit after at most
+three inspection actions, and stop only for repeated identical actions or no
+progress through the same overall budget. Retain raw responses so thinking
+controls and compaction summaries can be checked. OpenHands' run is additionally
+confounded by OpenCode-specific tool instructions. Pi's canary proves tool
+execution, not benchmark-task coding ability.
 
 ## Pi offline bootstrap, canary, and cattrs attempt (2026-10-26)
 
