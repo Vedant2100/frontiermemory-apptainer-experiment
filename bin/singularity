@@ -5,9 +5,15 @@ FM_EXPERIMENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "${1:-}" == "exec" ]]; then
   shift
+  FM_RIPGREP_BIN="$(command -v rg || true)"
+  if [[ -z "${FM_RIPGREP_BIN}" || ! -x "${FM_RIPGREP_BIN}" ]]; then
+    echo "Host ripgrep is required for offline OpenCode search tools" >&2
+    exit 2
+  fi
   FM_UV_ROOT="${FM_EXPERIMENT_ROOT}/runtime/uv"
   FM_HARBOR_WHEELHOUSE="${FM_EXPERIMENT_ROOT}/runtime/harbor-server-wheelhouse"
   FM_BIND_ARGS=()
+  FM_BIND_ARGS+=(--bind "${FM_RIPGREP_BIN}:/usr/local/bin/rg:ro")
   FM_PIP_ARGS=()
   if [[ -d "${FM_HARBOR_WHEELHOUSE}" ]]; then
     FM_BIND_ARGS+=(--bind "${FM_HARBOR_WHEELHOUSE}:/tmp/fm-harbor-wheelhouse:ro")

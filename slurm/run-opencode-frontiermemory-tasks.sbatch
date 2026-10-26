@@ -38,6 +38,7 @@ nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv >"${RUN_DIR}/g
 grep -q 'GeForce RTX 3090' "${RUN_DIR}/gpu.csv"
 .venv/bin/harbor --version >"${RUN_DIR}/harbor-version.txt"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
+rg --version >"${RUN_DIR}/host-ripgrep-version.txt"
 apptainer exec --fakeroot "${OLLAMA_SIF}" ollama --version >"${RUN_DIR}/ollama-version.txt" 2>&1
 printf '%s\n' "${MODEL}" >"${RUN_DIR}/model.txt"
 printf '%s\n' "${OLLAMA_CONTEXT_LENGTH}" >"${RUN_DIR}/requested-context.txt"
@@ -138,6 +139,28 @@ run_task() {
   mkdir -p "${task_dir}"
   test -f "${task_path}/task.toml"
   test -f "${task_path}/apptainer-adaptation.json"
+  python3 - "${task_path}/apptainer-adaptation.json" "${task_dir}" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+adaptation = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+task_dir = Path(sys.argv[2])
+for key, output_name in (
+    ("apptainer_image", "agent-ripgrep-version.txt"),
+    ("verifier_apptainer_image", "verifier-ripgrep-version.txt"),
+):
+    image = adaptation[key]
+    result = subprocess.run(
+        ["bin/singularity", "exec", image, "rg", "--version"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    (task_dir / output_name).write_text(result.stdout, encoding="utf-8")
+PY
 
   local -a prompt_args=(
     --base-config "${BASE_CONFIG}"

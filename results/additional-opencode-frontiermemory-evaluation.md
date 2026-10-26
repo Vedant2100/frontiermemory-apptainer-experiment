@@ -54,3 +54,15 @@ The frozen memory checksum remains `4ef8ff784aed9ce00d4532bedf3432347aa9af318562
 These CPU-only replays and canaries do not change the earlier agent trajectories, steps, tokens, or timings. Patches, generated memory, corpus files, SIFs, and raw verifier logs remain local and ignored. No model was loaded and no GPU was used.
 
 Raw trajectories, patches, verifier logs, task data, model files, and generated memory remain local and ignored. This published summary contains aggregate outcomes only. No leaderboard claim is made.
+
+## Latest CPU runner repair and v1.0 memory audit (2026-10-25)
+
+The staged Apptainer task copy now uses `git add -A` followed by a binary diff against the official base commit. This captures committed, dirty tracked, and untracked agent edits. A disposable CPU canary produced an 825-byte patch containing an uncommitted `README.md` edit and an untracked file. The unchanged official verifier applied that patch and wrote its normal reward JSON. The official cattrs task TOML and verifier/test files remain unchanged; staged verifier/test files match the source byte-for-byte. This proves artifact handoff, not a valid task score.
+
+The host's ripgrep 15.2.0 binary is bound read-only at `/usr/local/bin/rg` in both existing Apptainer SIFs. Search canaries succeeded in the agent and verifier images.
+
+The cattrs verifier did not reach a valid test result. Pytest 9.0.3 rejected `/tmp/pytest-of-agent` because the process running as `agent` (UID 10001) did not own that directory. Apptainer reported that the account has no `/etc/subuid` entry and was using a root-mapped fakeroot namespace. Re-running with a fresh `TMPDIR` and pre-creating the pytest directory did not resolve the ownership check. The verifier emitted reward 0 after its tests failed during setup; that value is not a task score. No A/B agent run was launched with this verifier state.
+
+The pinned `joint-674-v1.0` corpus manifest hash is `c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1`; all 674 listed file checksums were verified. Every cited step in historical trajectories `t0011.json` and `t0343.json` exists in those exact checksummed files, and both traces carry a final PASS marker. A CPU-curated 705-byte candidate memory has moderate process-level relevance to cattrs' public API feature: it advises mapping cross-cutting API integration paths and validating affected suites. It contains no cattrs-specific behavior. The candidate and evidence excerpts remain local. The local Qwen3-Coder 30B was not available for memory generation, so this candidate is not the model-generated frozen memory required for a paired run and was not used in evaluation.
+
+At this check, no Slurm job was active, the current shell had no `nvidia-smi` or host Ollama endpoint, and no model was loaded. The A/B pair remains unrun. The remaining blockers are the cattrs verifier's Apptainer UID ownership failure and unavailable local-model generation for the corrected memory. No leaderboard claim is made.

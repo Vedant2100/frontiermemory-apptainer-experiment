@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Create a local Harbor task view for an official task and local Apptainer SIF.
 
-The downloaded source task is left untouched. The copy changes only the image
-reference and network policy required by Harbor's Singularity backend; task
-instructions, tests, verifier code, and solution files are copied verbatim.
+The downloaded source task is left untouched. The copy points Harbor at local
+SIFs, adjusts its network policy, and uses a local patch collector that captures
+committed, uncommitted, and untracked agent edits. Task instructions, tests,
+verifier code, and solution files are copied verbatim.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import argparse
 import json
 import re
 import shutil
+import tomllib
 from pathlib import Path
 
 
@@ -39,12 +41,28 @@ def main() -> int:
         raise FileNotFoundError(args.opencode_runtime)
     if not args.opencode_shims.is_dir():
         raise FileNotFoundError(args.opencode_shims)
+    destination_resolved = destination.resolve()
+    for payload in (args.opencode_runtime.resolve(), args.opencode_shims.resolve()):
+        try:
+            payload.relative_to(destination_resolved)
+        except ValueError:
+            continue
+        raise ValueError(
+            f"OpenCode payload {payload} is inside the output task that will be replaced; "
+            "use the shared payload outside --output-root"
+        )
     if destination.exists():
         shutil.rmtree(destination)
     shutil.copytree(source, destination, symlinks=True)
 
     copied_toml = destination / "task.toml"
     content = copied_toml.read_text(encoding="utf-8")
+    with task_toml.open("rb") as stream:
+        official_config = tomllib.load(stream)
+    base_commit = official_config.get("metadata", {}).get("base_commit_hash")
+    if not base_commit:
+        raise ValueError("Official task metadata has no base_commit_hash")
+
     image_pattern = re.compile(r'(?m)^(docker_image\s*=\s*)"[^"]+"$')
     content, image_count = image_pattern.subn(
         lambda match: f'{match.group(1)}"{args.image.resolve()}"', content
@@ -78,6 +96,23 @@ def main() -> int:
     )
     if network_count < 2:
         raise ValueError(f"Expected agent and verifier network settings; found {network_count}")
+
+    # Harbor's standard git-diff collector misses uncommitted/untracked source
+    # edits in this Apptainer handoff. Override only the staged task copy's
+    # collector; the original verifier and official task remain untouched.
+    collector_command = (
+        "cd /app && mkdir -p /logs/artifacts && "
+        "git config --global --add safe.directory /app && git add -A && "
+        f"git diff --binary {base_commit} -- > /logs/artifacts/model.patch"
+    )
+    collector_pattern = re.compile(
+        r'(?ms)(\[\[verifier\.collect\]\]\s*\ncommand\s*=\s*)"[^"\n]*"'
+    )
+    content, collector_count = collector_pattern.subn(
+        lambda match: match.group(1) + json.dumps(collector_command), content
+    )
+    if collector_count != 1:
+        raise ValueError(f"Expected one verifier collector command; found {collector_count}")
     copied_toml.write_text(content, encoding="utf-8")
 
     environment_files = destination / "environment" / "files"
@@ -106,8 +141,11 @@ def main() -> int:
             "verifier.environment.docker_image": "local image based on the official task SIF with verifier files copied unchanged to /tests and any missing upstream source tree plus Git metadata restored at the exact task base commit",
             "network_mode": "public (Harbor Singularity backend does not enforce no-network)",
             "environment.files": "reused preinstalled OpenCode 1.19.4 and offline npm shims",
+            "verifier.collect": "local staged-task adapter runs git add -A then diffs against the official base commit so uncommitted and untracked agent edits are captured; original verifier scripts are unchanged",
         },
         "network_mode_fields_changed": network_count,
+        "collector_base_commit": base_commit,
+        "official_task_source_unchanged": True,
     }
     (destination / "apptainer-adaptation.json").write_text(
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
