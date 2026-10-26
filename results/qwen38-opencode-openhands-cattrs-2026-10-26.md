@@ -60,7 +60,7 @@ names in [issue #27361](https://github.com/anomalyco/opencode/issues/27361).
 
 | Agent | Edits/tests | Patch collector and separate verifier | Agent tokens |
 | --- | --- | --- | ---: |
-| OpenCode 1.19.4, corrected config | Created two files; all 4 focused `unittest` tests passed | 1,066-byte uncommitted patch collected; separate verifier passed (reward 1.0) | 34,608 input / 27,822 cached / 519 output |
+| OpenCode 1.19.4, corrected config | Created two files; all 4 focused `unittest` tests passed | 1,066-byte uncommitted patch collected; separate verifier passed (reward 1.0) | 34,608 input / 27,822 cached / 519 output; 22s agent execution, 69s total Harbor trial |
 
 The canary trajectory had no reasoning blocks. This verifies that the corrected
 configuration can perform native tool calls, write files, run tests, and pass
