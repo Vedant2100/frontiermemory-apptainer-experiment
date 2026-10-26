@@ -25,6 +25,10 @@ The agent behaved differently but did not solve the task. A used 24 `cat src/con
 
 Detailed setup failures, adaptations, and job IDs are in `history.md`.
 
+## Latest OpenCode runner check (2026-10-26)
+
+The cattrs no-memory A trace failed on repeated exact-match edit errors; the historical-memory B trace ended normally after returning pseudo-tool markup as plain text, before editing. The shared prompt now directs both conditions to use current file contents and recover mismatched edits through `write` or Bash/Python. A Harbor canary on the existing 30B/A5000 setup produced two new files, passed 4/4 tests, yielded a clean 1,112-byte patch, and passed its separate canary verifier. This is a runner check only; no new FrontierMemory A/B run or leaderboard result is claimed. Details: `additional-opencode-frontiermemory-evaluation.md`.
+
 ## Additional diagnostic experiments and stronger memory candidates
 
 | Run | Setup | Result | Interpretation |

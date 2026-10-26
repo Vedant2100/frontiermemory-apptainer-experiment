@@ -1,0 +1,33 @@
+schema_version = "1.4"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "letta-ai/opencode-reliability-canary"
+description = "Disposable Harbor canary for OpenCode file writes, tests, patch collection, and verifier replay."
+keywords = ["canary", "opencode", "apptainer"]
+
+[metadata]
+task_id = "opencode-reliability-canary"
+display_title = "OpenCode tool reliability canary"
+category = "canary"
+language = "python"
+
+[environment]
+docker_image = "/path/to/frontier-memory-cattrs.sif"
+network_mode = "public"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+
+[agent]
+network_mode = "public"
+timeout_sec = 900.0
+
+[verifier]
+network_mode = "public"
+environment_mode = "separate"
+timeout_sec = 300.0
+
+[[verifier.collect]]
+command = "cd /app && git config --global --add safe.directory /app && git add -A -- . ':!files/**' ':!.keep' && git diff --binary 6bc4708fb9b2ac52d9a18997e923da6a58916102 -- > /logs/artifacts/model.patch"
+timeout_sec = 60.0

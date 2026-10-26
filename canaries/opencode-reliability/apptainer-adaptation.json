@@ -1,0 +1,13 @@
+{
+  "task_id": "opencode-reliability-canary",
+  "official_source": "local disposable canary; not a FrontierMemory benchmark task",
+  "run_copy": "build/opencode-frontiermemory-tasks/opencode-reliability-canary",
+  "apptainer_image": "<workspace>/containers/frontier-memory-cattrs.sif",
+  "verifier_apptainer_image": "<workspace>/containers/frontier-memory-cattrs.sif",
+  "changes": {
+    "purpose": "Test OpenCode's Bash file creation, focused tests, uncommitted patch collection, and verifier replay in the existing Apptainer images.",
+    "environment.files": "Reuse the pinned OpenCode 1.19.4 Node runtime and offline npm shims from the existing staged FrontierMemory task.",
+    "benchmark_task_modified": false,
+    "images_rebuilt": false
+  }
+}

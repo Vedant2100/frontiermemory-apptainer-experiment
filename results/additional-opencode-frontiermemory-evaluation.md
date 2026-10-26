@@ -101,3 +101,25 @@ The earlier RTX 3090 A run (job 299276) had 68 trajectory steps, 62 tool calls, 
 The replay completed with reward 0: the baseline suite passed 7/7, the task feature suite passed 13/69 (56 failed), and the user-preference check was 0/1. The agent had reported its own tests as passing, but the original verifier did not support that claim. Its saved run used 924,765 prompt tokens (834,976 cached), 14,839 completion tokens, 9m43.8s agent time, and 10m26.8s Harbor time. The reconstructed patch attempted whole-object structuring and did not implement field-level partial results. Treat this as recovered evidence of implementation progress, not as the A side of the matched A5000 pair.
 
 All raw trajectories, patches, verifier logs, benchmark files, corpus data, generated memory, and model files remain local and ignored. These are exploratory results; no leaderboard claim is made.
+
+## OpenCode reliability diagnosis and Harbor canary (2026-10-26)
+
+### Diagnosis of the failed cattrs pair
+
+- In no-memory A (Slurm job `300092`), the agent reached code-edit attempts, but its first `edit` call was a no-op (`oldString` and `newString` were identical). Later calls supplied exact-match spans that did not match the current cattrs checkout; OpenCode returned the exact-match failure. The repeat watcher stopped the run after three edit failures. This was an agent edit-strategy failure, not a missing benchmark verifier or patch-collector failure.
+- In historical-memory B (job `300095`), Harbor and OpenCode exited normally (`harbor-exit-code=0`, no trial exception). After three successful tools (two Bash inspections and one `glob`), the model emitted literal `<tool_call>...` markup as ordinary assistant text. ATIF recorded `step_finish reason=stop` and no tool call for that final step. There was no source edit, test run, or patch. This is a model/tool-call-format termination, not a runtime crash and not evidence that memory caused the early stop.
+- Updated the shared prompt renderer in `scripts/render_opencode_memory_config.py` with the same execution rules for either condition: use native structured tool calls; continue through implementation, focused tests, and diff inspection; base exact-match edits on current file contents; after mismatch, reread and use native `write` or Bash/Python from inspected contents; report concrete blockers. The existing repeat watcher remains shared. The saved A and B prompt wrappers match byte-for-byte after replacing the memory body with a common slot marker. These updated rules were exercised in the canary below; the earlier cattrs A/B runs were not rerun with them.
+
+### Clean Harbor runner canary
+
+Job `300155` reused Harbor 0.24.0, OpenCode 1.19.4, Ollama 0.40.11, `qwen3-coder:30b`, Apptainer 1.5.2, the existing cattrs SIF, and the staged OpenCode runtime. It ran on an allocated RTX A5000 with the loaded 32,768-token context recorded through Ollama `/api/ps`. No model was pulled, no image rebuilt, and no benchmark task or verifier was modified.
+
+| Canary outcome | Steps | Prompt / cached / completion tokens | Agent / total trial time | Collected patch | Canary verifier |
+|---|---:|---:|---:|---:|---|
+| Created source and test files with native `write` calls; ran tests and checked repository status/diff. | 7 | 39,138 / 32,368 / 476 | 20.8 s / 70.6 s | 1,112 bytes; only the two intended untracked Python files | Pass (`reward=1`); 4/4 unit tests and independent contract checks passed |
+
+The model's `git diff` was empty because both new files were untracked; `git status` showed them, and the Harbor dirty-tree collector included both in the nonempty patch. The separate canary verifier applied that patch and passed. This verifies OpenCode file creation, focused test execution, dirty/untracked patch collection, and verifier handoff. It is not an official FrontierMemory task result and does not test recovery after an intentionally induced edit mismatch. Raw trial files and patch remain local; the canary source and sanitized summary are published.
+
+The earlier job `300152` is excluded: it reused a benchmark verifier by mistake and included the staged runtime payload in its patch. Job `300155` corrected both issues and is the canary result reported above.
+
+No FrontierMemory A/B rerun was launched. The previous benchmark pair remains inconclusive; this successful canary establishes a runner gate, not coding-task competence or memory effectiveness. No leaderboard claim is made.

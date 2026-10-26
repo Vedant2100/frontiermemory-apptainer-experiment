@@ -32,6 +32,17 @@ def main() -> int:
         "<historical_memory>\n"
         f"{safe_memory}\n"
         "</historical_memory>\n\n"
+        "Execution requirements:\n"
+        "- Use OpenCode's native tool calls. Text such as <tool_call> or "
+        "<function=...> is ordinary text, not an executed tool call.\n"
+        "- Do not stop after inspection. Make the requested code changes, run "
+        "a focused test, and inspect the resulting diff before finishing.\n"
+        "- Base exact-match edits on the current file contents. If an edit says "
+        "the old text does not match, re-read the file and do not retry with "
+        "guessed text. Use OpenCode's write tool or Bash with a small Python "
+        "script/heredoc based on the inspected file instead.\n"
+        "- If blocked, report the concrete blocker and do not imply the task is "
+        "complete.\n\n"
         "Current task instruction:\n{{ instruction }}\n"
     )
     args.prompt_template.parent.mkdir(parents=True, exist_ok=True)
