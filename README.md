@@ -21,6 +21,10 @@ Two additional official FrontierMemory v1.0 tasks were then run with the same Op
 
 A later matched run of `cattrs-compositional-changelog` used the same RTX 3090 and 30B model; B used the frozen historical memory. The no-memory agent produced a partial implementation (18/70 functional checks), while the memory agent stopped before editing after repeated reads. Both original verifiers ran, but this pair does not establish a memory effect. See [`results/cattrs-opencode-paired-3090-2026-10-26.md`](results/cattrs-opencode-paired-3090-2026-10-26.md) for sanitized metrics and termination details.
 
+## Qwen3.8-27B no-memory baseline
+
+Two independent OpenCode runs on `cattrs-compositional-changelog` used the official Ollama Q4_K_M tag on an RTX 3090 because all RTX 6000 Ada GPUs were allocated. Both agents returned empty patches; the original verifier reported 0/70 functional checks and 7/7 preference checks for each. The first attempt was manually stopped after read-only inspection, and the second exited at the configured output-token limit. See [`results/qwen38-cattrs-q4-baselines-2026-10-26.md`](results/qwen38-cattrs-q4-baselines-2026-10-26.md). No memory condition was run because neither attempt made implementation progress.
+
 ## Setup and deviations
 
 - Cluster: Slurm, Apptainer 1.5.2, NVIDIA RTX 2080 Ti with 10.6 GiB VRAM. Docker was unavailable; Harbor 0.24.0's Singularity backend was invoked through `bin/singularity`.

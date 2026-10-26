@@ -20,6 +20,7 @@
 /models/
 /frontiermemory/
 /jobs/
+/jobs-qwen38-regrade/
 /build/
 /containers/*.sif
 /containers/apptainer-cache/

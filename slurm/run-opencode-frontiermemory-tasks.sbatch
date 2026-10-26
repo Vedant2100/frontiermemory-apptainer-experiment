@@ -23,13 +23,20 @@ export TERM=xterm-256color
 CONDITION="${CONDITION:?Set CONDITION=A or CONDITION=B}"
 case "${CONDITION}" in A|B) ;; *) echo "CONDITION must be A or B" >&2; exit 2 ;; esac
 TASK_IDS="${TASK_IDS:?Set colon-separated TASK_IDS}"
-MODEL=qwen3-coder:30b
+MODEL="${MODEL:-qwen3-coder:30b}"
 EXPECTED_GPU_REGEX="${EXPECTED_GPU_REGEX:-GeForce RTX 3090}"
+MODEL_SLUG="${MODEL//:/-}"
+ATTEMPTS="${ATTEMPTS:-1}"
 MODEL_STORE=/home/csgrad/vbork001/shared-mem-gov-pilot/models
 OLLAMA_SIF="${PWD}/containers/ollama.sif"
-BASE_CONFIG="${PWD}/configs/opencode-qwen3-coder-30b-A.yaml"
+BASE_CONFIG="${BASE_CONFIG:-${PWD}/configs/opencode-qwen3-coder-30b-A.yaml}"
 TASK_ROOT="${PWD}/build/opencode-frontiermemory-tasks"
 RUN_DIR="${PWD}/results/opencode-frontiermemory-tasks/job-${SLURM_JOB_ID}-${CONDITION}"
+
+if ! [[ "${ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
 
 mkdir -p "${RUN_DIR}/ollama"
 date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
@@ -134,9 +141,10 @@ CONTEXT_PID=$!
 
 run_task() {
   local task_id="$1"
+  local attempt="$2"
   local task_path="${TASK_ROOT}/${task_id}"
-  local task_dir="${RUN_DIR}/${task_id}"
-  local harbor_job_name="frontiermemory-v1.0-${task_id}-opencode-qwen3-coder-30b-${CONDITION}-${SLURM_JOB_ID}"
+  local task_dir="${RUN_DIR}/${task_id}/attempt-${attempt}"
+  local harbor_job_name="frontiermemory-v1.0-${task_id}-opencode-${MODEL_SLUG}-${CONDITION}-${SLURM_JOB_ID}-attempt-${attempt}"
   local harbor_pid watch_pid harbor_exit
   mkdir -p "${task_dir}"
   test -f "${task_path}/task.toml"
@@ -219,7 +227,9 @@ PY
 
 IFS=':' read -r -a TASK_ARRAY <<<"${TASK_IDS}"
 for task_id in "${TASK_ARRAY[@]}"; do
-  run_task "${task_id}"
+  for attempt in $(seq 1 "${ATTEMPTS}"); do
+    run_task "${task_id}" "${attempt}"
+  done
 done
 
 curl --fail --silent http://127.0.0.1:11434/api/ps >"${RUN_DIR}/ollama/loaded-model-at-end.json" || true
