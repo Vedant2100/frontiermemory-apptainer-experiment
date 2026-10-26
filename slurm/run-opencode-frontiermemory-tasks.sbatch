@@ -27,6 +27,9 @@ MODEL="${MODEL:-qwen3-coder:30b}"
 EXPECTED_GPU_REGEX="${EXPECTED_GPU_REGEX:-GeForce RTX 3090}"
 MODEL_SLUG="${MODEL//:/-}"
 ATTEMPTS="${ATTEMPTS:-1}"
+PROMPT_PROFILE="${PROMPT_PROFILE:-paired}"
+NO_PROGRESS_STEPS="${NO_PROGRESS_STEPS:-8}"
+AGENT_TIMEOUT_MULTIPLIER="${AGENT_TIMEOUT_MULTIPLIER:-1.0}"
 MODEL_STORE=/home/csgrad/vbork001/shared-mem-gov-pilot/models
 OLLAMA_SIF="${PWD}/containers/ollama.sif"
 BASE_CONFIG="${BASE_CONFIG:-${PWD}/configs/opencode-qwen3-coder-30b-A.yaml}"
@@ -177,6 +180,7 @@ PY
 
   local -a prompt_args=(
     --base-config "${BASE_CONFIG}"
+    --profile "${PROMPT_PROFILE}"
     --prompt-template "${task_dir}/prompt-template.md"
     --output-config "${task_dir}/opencode.yaml"
   )
@@ -195,6 +199,7 @@ PY
     --job-name "${harbor_job_name}" \
     --n-attempts 1 \
     --n-concurrent 1 \
+    --agent-timeout-multiplier "${AGENT_TIMEOUT_MULTIPLIER}" \
     --yes >"${task_dir}/harbor.log" 2>&1 &
   harbor_pid=$!
   python3 scripts/watch_harbor_opencode.py \
@@ -202,6 +207,7 @@ PY
     --job-name "${harbor_job_name}" \
     --harbor-pid "${harbor_pid}" \
     --marker "${task_dir}/repetition-stop.json" \
+    --no-progress-steps "${NO_PROGRESS_STEPS}" \
     >"${task_dir}/watch.log" 2>&1 &
   watch_pid=$!
   wait "${harbor_pid}"

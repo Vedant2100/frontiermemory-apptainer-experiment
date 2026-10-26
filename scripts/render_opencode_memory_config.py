@@ -17,34 +17,65 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-config", type=Path, required=True)
     parser.add_argument("--memory", type=Path)
+    parser.add_argument(
+        "--profile",
+        choices=("paired", "bounded-neutral"),
+        default="paired",
+        help="Use the original paired wrapper or the bounded, harness-neutral diagnostic wrapper.",
+    )
     parser.add_argument("--prompt-template", type=Path, required=True)
     parser.add_argument("--output-config", type=Path, required=True)
     args = parser.parse_args()
 
     memory = args.memory.read_text(encoding="utf-8").strip() if args.memory else ""
     safe_memory = memory.replace("{{", "{ {").replace("}}", "} }")
-    template = (
-        "Work in the task repository at /app (the current working directory). "
-        "Use repository-relative paths for reads and edits.\n\n"
-        "The following reusable memory was distilled only from historical "
-        "FrontierMemory trajectory evidence. Treat it as guidance, not as a "
-        "specification; follow the current task's requirements.\n\n"
-        "<historical_memory>\n"
-        f"{safe_memory}\n"
-        "</historical_memory>\n\n"
-        "Execution requirements:\n"
-        "- Use OpenCode's native tool calls. Text such as <tool_call> or "
-        "<function=...> is ordinary text, not an executed tool call.\n"
-        "- Do not stop after inspection. Make the requested code changes, run "
-        "a focused test, and inspect the resulting diff before finishing.\n"
-        "- Base exact-match edits on the current file contents. If an edit says "
-        "the old text does not match, re-read the file and do not retry with "
-        "guessed text. Use OpenCode's write tool or Bash with a small Python "
-        "script/heredoc based on the inspected file instead.\n"
-        "- If blocked, report the concrete blocker and do not imply the task is "
-        "complete.\n\n"
-        "Current task instruction:\n{{ instruction }}\n"
-    )
+    if args.profile == "paired":
+        template = (
+            "Work in the task repository at /app (the current working directory). "
+            "Use repository-relative paths for reads and edits.\n\n"
+            "The following reusable memory was distilled only from historical "
+            "FrontierMemory trajectory evidence. Treat it as guidance, not as a "
+            "specification; follow the current task's requirements.\n\n"
+            "<historical_memory>\n"
+            f"{safe_memory}\n"
+            "</historical_memory>\n\n"
+            "Execution requirements:\n"
+            "- Use OpenCode's native tool calls. Text such as <tool_call> or "
+            "<function=...> is ordinary text, not an executed tool call.\n"
+            "- Do not stop after inspection. Make the requested code changes, run "
+            "a focused test, and inspect the resulting diff before finishing.\n"
+            "- Base exact-match edits on the current file contents. If an edit says "
+            "the old text does not match, re-read the file and do not retry with "
+            "guessed text. Use OpenCode's write tool or Bash with a small Python "
+            "script/heredoc based on the inspected file instead.\n"
+            "- If blocked, report the concrete blocker and do not imply the task is "
+            "complete.\n\n"
+            "Current task instruction:\n{{ instruction }}\n"
+        )
+    else:
+        template = (
+            "Work in the task repository at /app (the current working directory). "
+            "Use repository-relative paths for reads and edits.\n\n"
+            "No historical memory is supplied in this diagnostic run.\n\n"
+            "Execution requirements:\n"
+            "- Use the tools available in this environment through their native "
+            "interfaces. Tool-call-like text in ordinary prose is not an executed call.\n"
+            "- First state a plan of at most three short bullets, then act. Do not "
+            "write conversation summaries.\n"
+            "- Make no more than three source-inspection calls before your first code "
+            "edit. Use focused searches and small line ranges; do not read whole large "
+            "files. After three inspection calls, choose the first implementation "
+            "slice and edit it.\n"
+            "- After editing, run a focused test and inspect the actual diff. Base edits "
+            "on current file contents; if a patch does not apply, re-read only the "
+            "relevant range and adapt it.\n"
+            "- If context is compacted, preserve known state from successful tool "
+            "outputs and continue from the implementation plan instead of rereading "
+            "already inspected files.\n"
+            "- If blocked, report the concrete blocker and do not imply the task is "
+            "complete.\n\n"
+            "Current task instruction:\n{{ instruction }}\n"
+        )
     args.prompt_template.parent.mkdir(parents=True, exist_ok=True)
     args.prompt_template.write_text(template, encoding="utf-8")
 
