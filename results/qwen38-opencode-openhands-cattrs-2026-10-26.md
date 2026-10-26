@@ -195,6 +195,41 @@ controls and compaction summaries can be checked. OpenHands' run is additionally
 confounded by OpenCode-specific tool instructions. Pi's canary proves tool
 execution, not benchmark-task coding ability.
 
+## Bounded, harness-neutral OpenCode retry (job 301018)
+
+This run kept OpenCode 1.19.4, Qwen3.8 27B Q4, the RTX 3090, Ollama 0.40.11,
+32,768 loaded context, and the unchanged cattrs task/verifier. It supplied no
+memory. The new prompt named no harness-specific tools, limited source
+inspection to three calls before editing, and instructed the agent to use
+focused reads. Harbor's agent timeout was set to 1,200 seconds to match the
+task's 20-minute instruction; the previous eight-turn no-progress cutoff was
+disabled while exact-repeat/error stops stayed active.
+
+| Measure | Result |
+| --- | --- |
+| Agent behavior | 40 tool calls over 27 assistant turns; 32 source-inspection calls before the first edit, contrary to the three-call checkpoint. Two context compactions. |
+| Actual change | One 3,441-byte new `src/cattrs/partial.py` stub. No `BaseConverter.partial_structure`, top-level export, or tests. The stub's `refine` relies on an unset `_converter` and is incomplete. No branch or commit. |
+| Tests | No focused test command attempted. The original verifier ran unchanged. |
+| Original verifier | Functional 0/70; preference 7/7; reward 0. |
+| Tokens | 427,335 input (347,350 cached), 5,724 output. |
+| Time | Agent 167 seconds by trajectory timestamps; Harbor trial 4m12s; Slurm allocation 4m35s. It ended naturally, well before the 20-minute timeout. |
+| Termination | The agent said it needed clarification about `refine`, defaults, nested values, completeness, and exports, although the task prompt explicitly specified these behaviors. It ended by asking the user rather than continuing. No infrastructure error or watchdog stop occurred. |
+
+This attempt shows that OpenCode can make a real file edit, but it does not
+establish implementation progress: the edit is only a knowingly incomplete
+stub. The neutral prompt and three-inspection checkpoint did not change the
+agent's behavior; the model ignored the checkpoint, compacted twice, and asked
+for answers already present in the task. The dominant observed problem is now
+agent planning/instruction following on this task, with compaction as an
+additional contributor. This still does not isolate the model from OpenCode's
+prompt/context handling. Do not start a memory comparison from this result.
+
+The generated prompt and config are under ignored
+`results/opencode-frontiermemory-tasks/job-301018-A/`; raw trajectory, patch,
+verifier logs, and Ollama traces are under ignored
+`jobs/frontiermemory-v1.0-cattrs-compositional-changelog-opencode-qwen3.8-27b-mtp-q4_K_M-A-301018-attempt-1/`.
+Gated data and raw artifacts remain local.
+
 ## Pi offline bootstrap, canary, and cattrs attempt (2026-10-26)
 
 The first Pi launch confirmed Harbor's default NVM bootstrap could not resolve
