@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -55,6 +56,72 @@ def parse_tool_calls(path: Path) -> list[dict[str, Any]]:
         if call is not None:
             calls.append(call)
     return calls
+
+
+def is_progress_call(call: dict[str, Any]) -> bool:
+    if call["status"] not in {"completed", "success"}:
+        return False
+    tool = call["tool"]
+    if tool in {"edit", "write", "apply_patch"}:
+        return True
+    if tool not in {"bash", "shell"}:
+        return False
+    command = str((call["input"] or {}).get("command") or "")
+    test_command = re.search(
+        r"\b(pytest|unittest|tox|nox|npm\s+test|pnpm\s+test|yarn\s+test|go\s+test|cargo\s+test|mvn\s+test|gradle\s+test)\b",
+        command,
+    )
+    write_command = re.search(
+        r"(?:\b(?:cat|tee|printf)\b[^\n]{0,500}(?:>>?|\btee\s+\S+)|"
+        r"\b(?:touch|cp|mv|patch)\b|"
+        r"\b(?:sed|perl)\s+-i\b|\bwrite_text\s*\(|\bopen\([^\n]{0,120},\s*['\"]w)",
+        command,
+    )
+    return bool(test_command or write_command)
+
+
+def reason_for_unproductive_steps(path: Path, step_limit: int) -> dict[str, Any] | None:
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+    events = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    no_progress_steps = 0
+    step_had_progress = False
+    for event in events:
+        event_type = event.get("type")
+        part = event.get("part") or {}
+        if event_type == "step_start":
+            step_had_progress = False
+        elif event_type == "tool_use":
+            call = parse_event(json.dumps(event))
+            if call and is_progress_call(call):
+                step_had_progress = True
+        elif event_type == "step_finish":
+            if step_had_progress:
+                no_progress_steps = 0
+            else:
+                no_progress_steps += 1
+                if part.get("reason") == "length":
+                    return {
+                        "reason": "an assistant turn exhausted its output limit without a code edit or test",
+                        "no_progress_steps": no_progress_steps,
+                    }
+                if no_progress_steps >= step_limit:
+                    return {
+                        "reason": "too many consecutive assistant turns ended without a code edit or test",
+                        "no_progress_steps": no_progress_steps,
+                    }
+            step_had_progress = False
+    return None
 
 
 def reason_for_repeated_operation(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -213,7 +280,9 @@ def stop_opencode(harbor_pid: int) -> bool:
     return interrupt_process(opencode_pid, signal.SIGKILL, 1)
 
 
-def stop_reason(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+def stop_reason(
+    calls: list[dict[str, Any]], event_file: Path, no_progress_steps: int
+) -> dict[str, Any] | None:
     detectors = (
         reason_for_repeated_operation,
         reason_for_repeated_tool_error,
@@ -223,7 +292,7 @@ def stop_reason(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
         reason = detector(calls)
         if reason is not None:
             return reason
-    return None
+    return reason_for_unproductive_steps(event_file, no_progress_steps)
 
 
 def main() -> int:
@@ -233,6 +302,7 @@ def main() -> int:
     parser.add_argument("--harbor-pid", type=int, required=True)
     parser.add_argument("--marker", type=Path, required=True)
     parser.add_argument("--interval", type=float, default=15.0)
+    parser.add_argument("--no-progress-steps", type=int, default=8)
     args = parser.parse_args()
 
     previous_count = 0
@@ -250,7 +320,7 @@ def main() -> int:
                     flush=True,
                 )
                 previous_count = len(calls)
-            reason = stop_reason(calls)
+            reason = stop_reason(calls, event_file, args.no_progress_steps)
             if reason is not None:
                 reason.update(
                     event_file=str(event_file),

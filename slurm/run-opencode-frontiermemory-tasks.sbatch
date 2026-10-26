@@ -104,6 +104,9 @@ if ! grep -q "${MODEL}" "${RUN_DIR}/ollama/tags-before.json"; then
 fi
 curl --fail --silent http://127.0.0.1:11434/api/tags >"${RUN_DIR}/ollama/tags.json"
 grep -q "${MODEL}" "${RUN_DIR}/ollama/tags.json"
+.venv/bin/python scripts/probe_ollama_thinking.py \
+  --model "${MODEL}" \
+  --output-dir "${RUN_DIR}/ollama/thinking-probe"
 
 python3 - "${RUN_DIR}/ollama" >"${RUN_DIR}/ollama/context-poller.log" 2>&1 <<'PY' &
 import json
