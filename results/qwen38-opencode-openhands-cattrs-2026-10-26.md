@@ -111,6 +111,10 @@ No image rebuild or dependency-download workaround was attempted.
 - **OpenHands comparison:** Not measured. The adapter is blocked by compute
   container DNS during its dependency installation, before agent execution.
   Therefore there is no valid OpenHands-versus-OpenCode coding comparison.
+- **Pi follow-up:** Also blocked before agent execution by DNS resolution for
+  its NVM installer. Together these failures show that on-demand harness setup
+  is constrained by container network access; they say nothing about either
+  agent's coding quality.
 
 ## Recommendation
 
@@ -123,9 +127,27 @@ an agent makes a real edit and runs a focused test. An OpenHands comparison
 requires a preinstalled SDK/runtime in the existing image or an allowed offline
 wheel/Python source; this attempt did not test OpenHands agent quality.
 
+## Pi adapter canary follow-up
+
+A bounded Pi 0.85.1 canary was submitted as Slurm job 300675 on the same RTX
+3090, using the existing Qwen3.8 Q4 model, Ollama SIF, and Apptainer task
+image. Ollama confirmed the model loaded with a 32,768-token context and
+17,445,871,942 bytes in VRAM. The run used `openai-completions`, thinking off,
+an eight-turn cap, and an empty-memory prompt wrapper.
+
+Harbor's Pi adapter failed during setup before invoking the model. Its pinned
+installer attempted to fetch NVM from `raw.githubusercontent.com`, which failed
+with `Could not resolve host: raw.githubusercontent.com`; Harbor classified it
+as `NetworkConnectionError`. The trial lasted about 23 seconds. There were no
+model tokens, code edits, tests, nonempty patch, or verifier score. The canary
+gate therefore failed, and no cattrs Pi run was launched. Harbor's failure
+cleanup created a zero-byte `model.patch`; the verifier did not run. This is an
+infrastructure failure, not evidence about Pi's coding ability. No workaround,
+runtime install, or image rebuild was attempted.
+
 ## Local raw artifacts
 
 Raw trajectories, prompts, patches, Ollama logs, task copies, and verifier logs
-remain under ignored `jobs/`, `results/opencode-frontiermemory-tasks/`, and
-`results/openhands-sdk-frontiermemory/` paths. They are not included in the
-repository commit.
+remain under ignored `jobs/`, `results/opencode-frontiermemory-tasks/`,
+`results/openhands-sdk-frontiermemory/`, and `results/pi-frontiermemory-no-memory/`
+paths. They are not included in the repository commit.
