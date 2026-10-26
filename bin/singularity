@@ -12,8 +12,15 @@ if [[ "${1:-}" == "exec" ]]; then
   fi
   FM_UV_ROOT="${FM_EXPERIMENT_ROOT}/runtime/uv"
   FM_HARBOR_WHEELHOUSE="${FM_EXPERIMENT_ROOT}/runtime/harbor-server-wheelhouse"
+  FM_OPENHANDS_VENV="${FM_OPENHANDS_VENV:-${FM_EXPERIMENT_ROOT}/runtime/openhands-sdk-venv}"
   FM_BIND_ARGS=()
   FM_BIND_ARGS+=(--bind "${FM_RIPGREP_BIN}:/usr/local/bin/rg:ro")
+  if [[ -x "${FM_OPENHANDS_VENV}/bin/python" ]]; then
+    # Harbor's OpenHands adapter installs Python/SDK dependencies at this exact
+    # path. Bind the host-staged venv read-only so task-container DNS is not
+    # needed and the existing task image remains unchanged.
+    FM_BIND_ARGS+=(--bind "${FM_OPENHANDS_VENV}:/opt/openhands-sdk-venv:ro")
+  fi
   # Pytest 9's default /tmp/pytest-of-agent ownership check fails inside
   # Apptainer's root-mapped fakeroot namespace. Keep the official verifier
   # untouched; a scoped sitecustomize hook appends --basetemp to the verifier's

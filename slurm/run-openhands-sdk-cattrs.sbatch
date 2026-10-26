@@ -23,7 +23,8 @@ MODEL="qwen3.8:27b-mtp-q4_K_M"
 MODEL_API_NAME="openai/${MODEL}"
 MODEL_STORE="/home/csgrad/vbork001/shared-mem-gov-pilot/models"
 OLLAMA_SIF="${PWD}/containers/ollama.sif"
-TASK_PATH="${PWD}/build/opencode-frontiermemory-tasks/cattrs-compositional-changelog"
+TASK_PATH="${TASK_PATH:-${PWD}/build/opencode-frontiermemory-tasks/cattrs-compositional-changelog}"
+TASK_IMAGE="${TASK_IMAGE:-${PWD}/containers/frontier-memory-cattrs.sif}"
 PROMPT_TEMPLATE="${OPENHANDS_PROMPT_TEMPLATE:?Pass the no-memory prompt template from the OpenCode run}"
 RUN_DIR="${PWD}/results/openhands-sdk-frontiermemory/job-${SLURM_JOB_ID}"
 HARBOR_JOB_NAME="frontiermemory-v1.0-cattrs-compositional-changelog-openhands-sdk-${MODEL//:/-}-A-${SLURM_JOB_ID}"
@@ -31,6 +32,8 @@ HARBOR_JOB_NAME="frontiermemory-v1.0-cattrs-compositional-changelog-openhands-sd
 test -s "${PROMPT_TEMPLATE}"
 test -d "${MODEL_STORE}"
 test -f "${OLLAMA_SIF}"
+test -f "${TASK_IMAGE}"
+test -f "${TASK_PATH}/task.toml"
 mkdir -p "${RUN_DIR}/ollama"
 date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
 scontrol show job "${SLURM_JOB_ID}" >"${RUN_DIR}/slurm-job.txt"
@@ -39,6 +42,12 @@ nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv >"${RUN_DIR}/g
 grep -Eq 'GeForce RTX 3090' "${RUN_DIR}/gpu.csv"
 .venv/bin/harbor --version >"${RUN_DIR}/harbor-version.txt"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
+runtime/uv/bin/uv pip freeze --python runtime/openhands-sdk-venv/bin/python \
+  >"${RUN_DIR}/openhands-sdk-freeze.txt"
+singularity exec --fakeroot "${TASK_IMAGE}" \
+  /opt/openhands-sdk-venv/bin/python -c \
+  'import openhands.sdk, openhands.tools, fastapi; print("openhands-sdk", openhands.sdk.__version__); print("fastapi", fastapi.__version__)' \
+  >"${RUN_DIR}/openhands-apptainer-preflight.txt"
 apptainer exec --fakeroot "${OLLAMA_SIF}" ollama --version >"${RUN_DIR}/ollama-version.txt" 2>&1
 printf '%s\n' "${MODEL}" >"${RUN_DIR}/model.txt"
 printf '%s\n' "${PROMPT_TEMPLATE}" >"${RUN_DIR}/prompt-template-path.txt"

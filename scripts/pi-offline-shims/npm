@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "--version" ]]; then
+  exec /staging/env_files/opencode-runtime/node/bin/npm "$@"
+fi
+
+if [[ "${1:-}" == "i" || "${1:-}" == "install" ]]; then
+  if [[ "${2:-}" == "-g" && "${3:-}" == "--ignore-scripts" \
+    && "${4:-}" == "@earendil-works/pi-coding-agent@0.85.1" ]] \
+    && [[ -f /staging/env_files/pi-runtime/lib/node_modules/@earendil-works/pi-coding-agent/package.json ]] \
+    && grep -q '"version": "0.85.1"' \
+      /staging/env_files/pi-runtime/lib/node_modules/@earendil-works/pi-coding-agent/package.json; then
+    printf 'Pi 0.85.1 already staged in the Apptainer environment files\n'
+    exit 0
+  fi
+  if [[ "${2:-}" == "-g" && "${3:-}" == "opencode-ai@1.19.4" ]] \
+    && command -v opencode >/dev/null 2>&1 \
+    && [[ "$(opencode --version)" == "1.19.4" ]]; then
+    printf 'opencode-ai@1.19.4 already mounted from the successful smoke setup\n'
+    exit 0
+  fi
+fi
+
+exec /staging/env_files/opencode-runtime/node/bin/npm "$@"

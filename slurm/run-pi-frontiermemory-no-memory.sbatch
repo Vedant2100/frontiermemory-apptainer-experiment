@@ -159,6 +159,8 @@ timeout --signal=INT --kill-after=15s 900s .venv/bin/harbor run \
   --agent-kwarg thinking=off \
   --agent-kwarg max_turns=8 \
   --agent-kwarg "prompt_template_path=${PROMPT_TEMPLATE}" \
+  --agent-env "PATH=/staging/env_files/shims:/staging/env_files/pi-runtime/bin:/staging/env_files/opencode-runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  --agent-env NPM_CONFIG_PREFIX=/staging/env_files/pi-runtime \
   --agent-env OLLAMA_API_KEY=local-ollama-no-auth \
   --agent-env OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 \
   --n-attempts 1 \

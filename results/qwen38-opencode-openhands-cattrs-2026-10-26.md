@@ -79,75 +79,131 @@ failure.
 
 ## OpenHands SDK attempt
 
-Harbor 0.24.0 exposes an `openhands-sdk` adapter that runs the SDK in the task
-container; it does not require Docker. The attempt used the same fresh staged
-task, local Ollama model, RTX 3090 class, 32K Ollama context, shared no-memory
-prompt file, `reasoning_effort=none`, temperature 1.0, and an eight-iteration
-cap. The local Ollama API probe succeeded and showed the model loaded at 32K.
+Harbor 0.24.0's `openhands-sdk` adapter runs the SDK inside the task container
+and does not require Docker. The first attempt (job 300637) failed before its
+first model call because the adapter tried to fetch `uv` from `astral.sh` and
+task-container DNS could not resolve it. I resolved that without rebuilding the
+image: the existing cluster UV/Python 3.12 runtime installed the adapter's
+dependencies into a persistent local venv, and the repo's Singularity wrapper
+binds it read-only at Harbor's expected `/opt/openhands-sdk-venv` path. The
+staged versions were Python 3.12.15, UV 0.12.22, `openhands-sdk` 1.58.2,
+`openhands-tools` 1.58.2, and FastAPI 0.162.0 (187 packages total). An
+Apptainer preflight imported the SDK and tools from inside the existing task
+SIF. The pinned package list and staging command are saved in
+[`configs/openhands-sdk-python312-lock.txt`](../configs/openhands-sdk-python312-lock.txt)
+and [`scripts/stage_openhands_sdk_runtime.sh`](../scripts/stage_openhands_sdk_runtime.sh).
+No model was downloaded and no SIF was rebuilt.
 
-The adapter stopped during setup, before its first model call. Its pinned Harbor
-implementation attempts to download `uv`, Python 3.12, `openhands-sdk`, and
-`openhands-tools` inside the task environment. The first command,
-`curl -LsSf https://astral.sh/uv/install.sh`, failed with exit 6:
-`Could not resolve host: astral.sh`. Harbor classified this as
-`NetworkConnectionError`; no trajectory, patch, tokens, or verifier result
-exists for OpenHands. The adapter's installation path is visible in the
-[Harbor OpenHands SDK source](https://github.com/harbor-framework/harbor/blob/v0.24.0/src/harbor/agents/installed/openhands_sdk.py).
-No image rebuild or dependency-download workaround was attempted.
+One retry (job 300827) failed in my preflight because I invoked raw `apptainer`
+and bypassed the bind-aware `singularity` wrapper. It ended before Ollama or
+Harbor agent execution and is excluded from agent results. After correcting
+that one command, job 300829 ran OpenHands on a fresh copy of the official
+`cattrs-compositional-changelog` task, with the same RTX 3090, Qwen3.8 Q4 model,
+32K loaded context, empty-memory prompt file, temperature 1.0,
+`reasoning_effort=none`, and eight-iteration cap as the prior comparison. The
+OpenHands task prompt intentionally reused the saved OpenCode prompt verbatim;
+it includes OpenCode-specific tool wording, so tool/harness differences remain
+a confound even though the task text and settings were held fixed.
+
+| OpenHands no-memory run | Result |
+| --- | --- |
+| Agent behavior | Reached the eight-iteration cap in 43.3s (12 trajectory records); 10 valid native calls (5 terminal, 5 file views), all source inspection/search or a pytest-version/import probe; no source edit and no task test suite run |
+| Patch | Empty (0 bytes) |
+| Original verifier | Ran unchanged: functional 0/70, preference 7/7, reward 0 |
+| Usage and time | 126,622 prompt tokens (103,305 cached), 721 output tokens; 43.3s agent, 99.3s total Harbor trial |
+
+The SDK trajectory has no separate reasoning-token field; the run requested
+`reasoning_effort=none`. The benchmark task's nine original verifier/test files
+were byte-identical in the fresh task copy. Only that copy's `task.toml` has
+the documented Apptainer/network/collector adaptations.
+
+This establishes that the Harbor adapter, Apptainer bind, Ollama-compatible
+endpoint, and OpenHands native tools execute together. It is a genuine
+no-progress task result with a valid original verifier score, not an
+infrastructure failure. LiteLLM's optional remote model-cost-map refresh logged
+DNS warnings and used its bundled local fallback; model calls still succeeded
+at zero cost. The earlier failed OpenHands job is setup-only and excluded.
 
 ## Assessment
 
-- **Tool-call compatibility:** Not the main observed OpenCode failure. The
-  canary passed, and the cattrs calls were valid native calls with no literal
-  tool markup. Patch collection and the original verifier worked.
+- **Tool-call compatibility:** Not the main observed failure. OpenCode and Pi
+  passed a small edit/test/collection/verifier canary. OpenHands passed its
+  Apptainer/Ollama preflight and made 10 valid native calls on cattrs. No
+  literal tool-call markup or adapter crash caused the no-progress outcomes.
 - **Thinking/output use:** A real contributor to the earlier A2 failure. The
   default medium mode used the entire 8,192-token turn for reasoning. The
   corrected OpenCode config produced no reasoning blocks in the canary or
-  cattrs trajectory.
-- **Task progress:** Still failing under OpenCode after that correction. The
-  cattrs attempt stopped after eight inspection-only turns with no edit/test.
-  The evidence supports a model-plus-agent task-planning problem, but does not
-  isolate model reasoning from OpenCode prompt/orchestration behavior.
-- **OpenHands comparison:** Not measured. The adapter is blocked by compute
-  container DNS during its dependency installation, before agent execution.
-  Therefore there is no valid OpenHands-versus-OpenCode coding comparison.
-- **Pi follow-up:** Also blocked before agent execution by DNS resolution for
-  its NVM installer. Together these failures show that on-demand harness setup
-  is constrained by container network access; they say nothing about either
-  agent's coding quality.
+  cattrs trajectory. Pi was configured with thinking off too; its completed
+  API calls reported zero reasoning tokens, though its final generation was
+  interrupted before a final usage record was available.
+- **Task progress:** Corrected OpenCode, Pi, and OpenHands all stopped before a
+  cattrs source edit. OpenHands reached its eight-iteration cap in 43 seconds;
+  Pi was manually stopped after a much longer inspection-only run. This pattern
+  is consistent with weak task planning or excessive inspection in this local
+  model-agent setup, but does not isolate model reasoning from harness prompts
+  or orchestration.
+- **OpenHands comparison:** Now measured as one no-memory run, not a causal
+  harness comparison. Its SDK, native tools, and Ollama endpoint worked in
+  Apptainer, but it also produced an empty patch and verifier 0/70. The reused
+  prompt contains OpenCode-specific tool wording, and the harnesses have
+  different iteration semantics.
+- **Pi:** Its offline runtime bootstrap was repaired without rebuilding the
+  Apptainer image. The Pi canary passed, but its real cattrs attempt produced
+  no implementation progress and was stopped early. That is agent/task
+  behavior, not an infrastructure failure. This was an exploratory harness
+  comparison, not a fully matched causal experiment: harness system prompts,
+  turn accounting, and stop events differ.
 
 ## Recommendation
 
-For future diagnostics, use the corrected OpenCode config, local Ollama
-`reasoning_effort=none`, 32K context, the existing Q4 model, the working
-collector/verifier path, and the 8-turn no-progress stop. This is the best
-verified local execution configuration, but the cattrs result is not a
-successful coding baseline. Do not start another memory A/B on this task until
-an agent makes a real edit and runs a focused test. An OpenHands comparison
-requires a preinstalled SDK/runtime in the existing image or an allowed offline
-wheel/Python source; this attempt did not test OpenHands agent quality.
+For future memory experiments, OpenCode 1.19.4 remains the best operational
+choice: its corrected no-thinking config and collector/verifier path are
+simpler, and its edit/test canary passed. Use the same Qwen3.8 Q4 model, 32K
+context, and bounded eight-turn/no-progress settings. However, no harness has
+yet demonstrated cattrs implementation progress, so do not treat any of these
+as a competent task-level baseline or start a memory A/B yet. OpenHands is now
+available for further comparison without an image rebuild; it is not currently
+better based on this one no-memory attempt. Pi's canary proves tool execution,
+not benchmark-task coding ability.
 
-## Pi adapter canary follow-up
+## Pi offline bootstrap, canary, and cattrs attempt (2026-10-26)
 
-A bounded Pi 0.85.1 canary was submitted as Slurm job 300675 on the same RTX
-3090, using the existing Qwen3.8 Q4 model, Ollama SIF, and Apptainer task
-image. Ollama confirmed the model loaded with a 32,768-token context and
-17,445,871,942 bytes in VRAM. The run used `openai-completions`, thinking off,
-an eight-turn cap, and an empty-memory prompt wrapper.
+The first Pi launch confirmed Harbor's default NVM bootstrap could not resolve
+`raw.githubusercontent.com`. I fixed this offline rather than rebuilding the
+task image: staged the pinned official `@earendil-works/pi-coding-agent@0.85.1`
+and its npm dependencies beside the already-mounted Node 22 runtime, and
+provided small `curl`/`npm` shims so Harbor's pinned installer sources the
+staged Pi runtime instead of reaching the network. The NVM-generated PATH must
+put the shim directory before the real npm binary; otherwise the networked npm
+installer wins. The reproducible staging script is
+[`scripts/stage_pi_offline_runtime.sh`](../scripts/stage_pi_offline_runtime.sh).
+No container image was rebuilt and the official task/verifier were not
+changed.
 
-Harbor's Pi adapter failed during setup before invoking the model. Its pinned
-installer attempted to fetch NVM from `raw.githubusercontent.com`, which failed
-with `Could not resolve host: raw.githubusercontent.com`; Harbor classified it
-as `NetworkConnectionError`. The trial lasted about 23 seconds. There were no
-model tokens, code edits, tests, nonempty patch, or verifier score. The canary
-gate therefore failed, and no cattrs Pi run was launched. Harbor's failure
-cleanup created a zero-byte `model.patch`; the verifier did not run. This is an
-infrastructure failure, not evidence about Pi's coding ability. No workaround,
-runtime install, or image rebuild was attempted.
+| Pi run | Work/result | Tokens and time |
+| --- | --- | --- |
+| Canary, job 300746 | Created two files, ran 4 focused `unittest` tests (4 passed), and Harbor collected a 1,082-byte uncommitted patch; separate canary verifier reward 1.0 | 6,804 input / 4,612 cached / 769 output tokens; 17.17s agent execution, 73.3s total trial |
+| cattrs no-memory, job 300758 | Seven completed turns; 14 native calls (6 Bash, 8 read), all inspection/search; no source edit, test, patch, or verifier | 15,027 uncached input / 41,319 cached input / 5,949 completed output tokens. API total 62,295. Stopped after 7m51s job wall time (about 6m56s since Pi session start). |
+
+Ollama confirmed the cattrs run used a 32,768-token loaded context and
+17,445,871,942 bytes of model VRAM. At stop time the eighth response was still
+generating at about 46 tokens/second; the last Ollama timing record showed
+`n_gen=12226`. This server counter is not an API usage total and is not
+interpreted as thinking tokens. The completed API records had zero reasoning
+tokens. The process was manually stopped under the no-progress guard before
+the configured eight-turn cap completed. There is no official cattrs verifier
+score for Pi; this is an incomplete agent attempt, not a benchmark fail.
+
+Harbor emitted a benign artifact-source overlap warning because `/logs/artifacts`
+and `/logs/artifacts/model.patch` both map into its shared artifact directory.
+It did not affect the canary patch collection. For cattrs there was no patch to
+collect. Raw partial logs and the session trajectory remain local under the
+ignored `results/pi-frontiermemory-no-memory/job-300758/harbor-partial/` path.
 
 ## Local raw artifacts
 
 Raw trajectories, prompts, patches, Ollama logs, task copies, and verifier logs
 remain under ignored `jobs/`, `results/opencode-frontiermemory-tasks/`,
 `results/openhands-sdk-frontiermemory/`, and `results/pi-frontiermemory-no-memory/`
-paths. They are not included in the repository commit.
+paths. They are not included in the repository commit. The local OpenHands
+Python environment is under ignored `runtime/openhands-sdk-venv/`.

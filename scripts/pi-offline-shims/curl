@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Harbor's pinned Pi adapter bootstraps NVM with this exact URL. Pi, Node, and
+# npm are staged in /staging/env_files, so provide the tiny NVM environment
+# expected by Harbor without requiring task-container network access.
+if [[ " $* " == *" https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh "* ]]; then
+  cat <<'INSTALL'
+set -euo pipefail
+mkdir -p "$HOME/.nvm"
+cat >"$HOME/.nvm/nvm.sh" <<'NVM'
+export PATH="/staging/env_files/shims:/staging/env_files/pi-runtime/bin:/staging/env_files/opencode-runtime/node/bin:$PATH"
+nvm() { return 0; }
+NVM
+INSTALL
+  exit 0
+fi
+
+exec /usr/bin/curl "$@"
