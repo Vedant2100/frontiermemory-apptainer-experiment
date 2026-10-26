@@ -19,6 +19,8 @@ An early Harbor + OpenCode attempt failed before Ollama received an inference re
 
 Two additional official FrontierMemory v1.0 tasks were then run with the same OpenCode, Ollama, and Apptainer stack. The cattrs A/B verifier pair scored 0 in both conditions; A made edits but did not commit them, while B stopped early after repeated tool errors. Cookie-store agents made edits, but both verifier attempts failed before producing scores because the runtime verifier workspace lacked an upstream test fixture. See [`results/additional-opencode-frontiermemory-evaluation.md`](results/additional-opencode-frontiermemory-evaluation.md) for the sanitized metrics and [`results/history.md`](results/history.md) for setup and troubleshooting details. These are exploratory diagnostics, not leaderboard results.
 
+A later matched run of `cattrs-compositional-changelog` used the same RTX 3090 and 30B model; B used the frozen historical memory. The no-memory agent produced a partial implementation (18/70 functional checks), while the memory agent stopped before editing after repeated reads. Both original verifiers ran, but this pair does not establish a memory effect. See [`results/cattrs-opencode-paired-3090-2026-10-26.md`](results/cattrs-opencode-paired-3090-2026-10-26.md) for sanitized metrics and termination details.
+
 ## Setup and deviations
 
 - Cluster: Slurm, Apptainer 1.5.2, NVIDIA RTX 2080 Ti with 10.6 GiB VRAM. Docker was unavailable; Harbor 0.24.0's Singularity backend was invoked through `bin/singularity`.
