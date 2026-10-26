@@ -14,6 +14,25 @@ if [[ "${1:-}" == "exec" ]]; then
   FM_HARBOR_WHEELHOUSE="${FM_EXPERIMENT_ROOT}/runtime/harbor-server-wheelhouse"
   FM_BIND_ARGS=()
   FM_BIND_ARGS+=(--bind "${FM_RIPGREP_BIN}:/usr/local/bin/rg:ro")
+  # Pytest 9's default /tmp/pytest-of-agent ownership check fails inside
+  # Apptainer's root-mapped fakeroot namespace. Keep the official verifier
+  # untouched; a scoped sitecustomize hook appends --basetemp to the verifier's
+  # PYTEST_ADDOPTS, using its existing agent-owned report directory.
+  FM_CATTRS_VERIFIER=0
+  for FM_ARG in "$@"; do
+    if [[ "${FM_ARG##*/}" == "frontier-memory-cattrs-verifier.sif" ]]; then
+      FM_CATTRS_VERIFIER=1
+      break
+    fi
+  done
+  if [[ "${FM_CATTRS_VERIFIER}" == "1" ]]; then
+    FM_PYTEST_HOOK="${FM_EXPERIMENT_ROOT}/scripts/cattrs-verifier-sitecustomize.py"
+    if [[ ! -f "${FM_PYTEST_HOOK}" ]]; then
+      echo "Missing cattrs verifier pytest hook: ${FM_PYTEST_HOOK}" >&2
+      exit 2
+    fi
+    FM_BIND_ARGS+=(--bind "${FM_PYTEST_HOOK}:/usr/local/lib/python3.12/site-packages/sitecustomize.py:ro")
+  fi
   FM_PIP_ARGS=()
   if [[ -d "${FM_HARBOR_WHEELHOUSE}" ]]; then
     FM_BIND_ARGS+=(--bind "${FM_HARBOR_WHEELHOUSE}:/tmp/fm-harbor-wheelhouse:ro")

@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 SYSTEM_PROMPT = """You turn evidence-backed lessons from historical coding-agent trajectories into concise reusable memory for a future coding agent.
 
-Use only the historical evidence supplied in the user message. Preserve source trajectory IDs as citations beside every rule. Keep rules actionable and general. Do not invent facts, task requirements, hidden answers, verifier details, or causal claims. Do not mention an evaluation target or any experiment/debugging history. Return Markdown with at most 12 short rules, each in the form situation, learned rule, evidence. If evidence does not support a rule, omit it."""
+Use only the historical evidence supplied in the user message. Keep rules actionable and general; do not carry over task-specific APIs, algorithms, or requirements from a source task. Do not invent facts, hidden answers, verifier details, or causal claims. Do not mention any evaluation target or experiment/debugging history. Return at most four short Markdown bullets. Each bullet must include situation, learned rule, and evidence. Every evidence field must cite one or more exact references in the form `inputs/tNNNN.json#step=N`, using only references present in the supplied evidence. If evidence does not support a rule, omit it."""
 
 
 def main() -> int:

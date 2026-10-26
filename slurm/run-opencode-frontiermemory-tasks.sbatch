@@ -24,6 +24,7 @@ CONDITION="${CONDITION:?Set CONDITION=A or CONDITION=B}"
 case "${CONDITION}" in A|B) ;; *) echo "CONDITION must be A or B" >&2; exit 2 ;; esac
 TASK_IDS="${TASK_IDS:?Set colon-separated TASK_IDS}"
 MODEL=qwen3-coder:30b
+EXPECTED_GPU_REGEX="${EXPECTED_GPU_REGEX:-GeForce RTX 3090}"
 MODEL_STORE=/home/csgrad/vbork001/shared-mem-gov-pilot/models
 OLLAMA_SIF="${PWD}/containers/ollama.sif"
 BASE_CONFIG="${PWD}/configs/opencode-qwen3-coder-30b-A.yaml"
@@ -35,7 +36,8 @@ date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
 scontrol show job "${SLURM_JOB_ID}" >"${RUN_DIR}/slurm-job.txt"
 nvidia-smi -q >"${RUN_DIR}/nvidia-smi.txt"
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv >"${RUN_DIR}/gpu.csv"
-grep -q 'GeForce RTX 3090' "${RUN_DIR}/gpu.csv"
+printf '%s\n' "${EXPECTED_GPU_REGEX}" >"${RUN_DIR}/expected-gpu-regex.txt"
+grep -Eq "${EXPECTED_GPU_REGEX}" "${RUN_DIR}/gpu.csv"
 .venv/bin/harbor --version >"${RUN_DIR}/harbor-version.txt"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
 rg --version >"${RUN_DIR}/host-ripgrep-version.txt"

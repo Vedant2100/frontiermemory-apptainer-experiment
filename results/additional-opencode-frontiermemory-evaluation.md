@@ -66,3 +66,38 @@ The cattrs verifier did not reach a valid test result. Pytest 9.0.3 rejected `/t
 The pinned `joint-674-v1.0` corpus manifest hash is `c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1`; all 674 listed file checksums were verified. Every cited step in historical trajectories `t0011.json` and `t0343.json` exists in those exact checksummed files, and both traces carry a final PASS marker. A CPU-curated 705-byte candidate memory has moderate process-level relevance to cattrs' public API feature: it advises mapping cross-cutting API integration paths and validating affected suites. It contains no cattrs-specific behavior. The candidate and evidence excerpts remain local. The local Qwen3-Coder 30B was not available for memory generation, so this candidate is not the model-generated frozen memory required for a paired run and was not used in evaluation.
 
 At this check, no Slurm job was active, the current shell had no `nvidia-smi` or host Ollama endpoint, and no model was loaded. The A/B pair remains unrun. The remaining blockers are the cattrs verifier's Apptainer UID ownership failure and unavailable local-model generation for the corrected memory. No leaderboard claim is made.
+
+## CPU runner repair, v1.0 memory generation, and cattrs runs (2026-10-26)
+
+This section supersedes the 2026-10-25 checkpoint above. The original task files and verifier remain unchanged.
+
+### Runner and verifier repair
+
+- The staged Apptainer task collector uses `git add -A` before a binary diff from the pinned base commit. A CPU canary with an uncommitted edit and a new untracked file produced an 825-byte patch containing both. The earlier cattrs A run's collector had captured an empty patch; its saved successful edit/write calls were therefore replayed separately, as described below.
+- The host ripgrep binary is bound read-only into the existing agent and verifier SIFs. A later OpenCode `glob` call succeeded offline.
+- Pytest 9's temp-directory ownership error was fixed at runtime with a verifier-only `sitecustomize.py` bind that sets a task-owned `--basetemp` when the official verifier has set `PYTEST_ADDOPTS`. The original verifier script and SIF were not modified. A CPU canary ran the original verifier to completion: baseline suite 7/7 passed; the feature tests could not collect against the documentation-only canary, as expected; the verifier returned its normal reward artifact. This canary checks runner plumbing, not task functionality.
+
+### Historical memory provenance
+
+- The pinned `joint-674-v1.0` corpus manifest SHA-256 is `c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1`; all 674 manifest entries were checksummed. The local model generated a 1,514-byte memory from selected historical agent messages only (1,397 prompt tokens, 343 completion tokens, 18.3 seconds). The task prompt, task verifier, patch, and prior experiment notes were not supplied; the generation input and output contain no cattrs or target-task markers.
+- Citation validation checked all eight memory references against the exact supplied excerpts, confirmed every cited step exists in the manifest-matching source files, and confirmed both sources ended with verifier PASS. The generated memory is frozen locally with checksum `0b97695a6643b962f66db830aa597c29551744a01896023581a0b9c1c6275797`. Corpus, excerpts, memory, citation records, and raw generation logs remain local.
+- Relevance is moderate at the workflow level and low at the feature-semantics level. One lesson about aligning public APIs, implementation paths, and existing tests applies to this public API task. The memory does not teach partial-field recovery, recursive semantics, or refinement behavior. No task-specific rule was added after generation.
+
+### Matched A/B run on an A5000
+
+Both runs below used Harbor 0.24.0, OpenCode 1.19.4, Ollama 0.40.11, `qwen3-coder:30b`, Apptainer 1.5.2, the same cattrs task copy and 32,768-token context on the same RTX A5000. Ollama `/api/ps` verified the loaded context in each run. The rendered prompt wrappers and agent configs are identical after removing the memory slot; A left that slot empty and B inserted only the frozen memory. The same early-stop watcher was used.
+
+| Condition | Agent behavior | Steps / tool calls | Agent tests | Prompt / cached / completion tokens | Agent / Harbor time | Original verifier |
+|---|---|---:|---|---:|---:|---|
+| A, no memory (job 300092) | Three repeated edit errors triggered the early stop; no source edit. | 29 / 27 | None | 400,264 / 331,278 / 4,242 | 157.3s / 201.8s | Reward 0; feature 0/69; baseline 7/7; preference 0/1 |
+| B, historical memory (job 300095) | Three successful inspection/search calls, then the agent ended before editing; no watcher repetition stop. | 5 / 3 | None | 26,463 / 19,768 / 104 | 14.3s / 58.7s | Reward 0; feature 0/69; baseline 7/7; preference 0/1 |
+
+The patch collector worked in both conditions; both emitted an empty patch. B had the full task instruction, the frozen memory, and a verified 32K context, but did not reach implementation. These matched runs do not show that memory helped or harmed coding; neither run made a source edit.
+
+### Recovered earlier no-memory A
+
+The earlier RTX 3090 A run (job 299276) had 68 trajectory steps, 62 tool calls, and real source and test edits, but its original Harbor collector emitted a zero-byte patch because the changes were not committed. The saved successful edit/write inputs were reconstructed against the pinned upstream checkout as a 10,468-byte patch and replayed through the unchanged original verifier. This is a transcript-recovered replay, not an artifact captured from the original working tree, and it used a 3090 rather than the A5000 used above.
+
+The replay completed with reward 0: the baseline suite passed 7/7, the task feature suite passed 13/69 (56 failed), and the user-preference check was 0/1. The agent had reported its own tests as passing, but the original verifier did not support that claim. Its saved run used 924,765 prompt tokens (834,976 cached), 14,839 completion tokens, 9m43.8s agent time, and 10m26.8s Harbor time. The reconstructed patch attempted whole-object structuring and did not implement field-level partial results. Treat this as recovered evidence of implementation progress, not as the A side of the matched A5000 pair.
+
+All raw trajectories, patches, verifier logs, benchmark files, corpus data, generated memory, and model files remain local and ignored. These are exploratory results; no leaderboard claim is made.
