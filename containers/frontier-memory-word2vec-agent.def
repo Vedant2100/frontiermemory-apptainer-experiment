@@ -1,0 +1,31 @@
+Bootstrap: localimage
+From: /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/frontier-memory-word2vec-verifier.sif
+
+%post
+    set -eu
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl git procps
+    rm -rf /var/lib/apt/lists/*
+    mkdir -p /usr/local/share/nltk_data
+    python - <<'PY'
+import nltk
+for package in (
+    "punkt",
+    "punkt_tab",
+    "stopwords",
+    "wordnet",
+    "omw-1.4",
+    "averaged_perceptron_tagger",
+    "averaged_perceptron_tagger_eng",
+):
+    if not nltk.download(package, download_dir="/usr/local/share/nltk_data", quiet=True):
+        raise SystemExit(f"Failed to download NLTK resource: {package}")
+PY
+
+%environment
+    export PYTHONPATH="/workspace:${PYTHONPATH:-}"
+    export PYTHONUNBUFFERED=1
+    export NLTK_DATA=/usr/local/share/nltk_data
+
+%runscript
+    exec /bin/bash "$@"

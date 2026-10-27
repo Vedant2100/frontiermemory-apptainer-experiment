@@ -16,6 +16,7 @@
 /results/ollama-*
 /results/awilix-ab-*-harbor-exits.txt
 /results/codex-awilix-frontier-2026-10-26/
+/results/word2vec-*/
 
 # Cluster-only environments, caches, model files, and generated task copies.
 /.venv/

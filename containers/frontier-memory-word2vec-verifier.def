@@ -1,0 +1,25 @@
+Bootstrap: docker
+From: python@sha256:5be5aaecb962a41567bc8041f1e9e3432cb085b037fe057f9a562630b2e4b370
+
+%post
+    set -eu
+    apt-get update
+    apt-get install -y --no-install-recommends passwd util-linux
+    rm -rf /var/lib/apt/lists/*
+    python -m pip install --no-cache-dir \
+        gensim==4.3.2 \
+        nltk==3.9.1 \
+        numpy==1.24.3 \
+        pytest==8.4.1 \
+        scipy==1.10.1
+    useradd --create-home --uid 10001 verifier
+    mkdir -p /workspace /logs/verifier
+    chmod 755 /workspace
+    chmod 700 /logs/verifier
+
+%environment
+    export PYTHONPATH="/workspace:${PYTHONPATH:-}"
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    exec /bin/bash "$@"
