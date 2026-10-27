@@ -3,7 +3,7 @@
 **Assessment date:** 2026-10-27  
 **Scope:** Open-weight models relevant to local FrontierMemory task solving, using the cluster's 24 GB RTX 3090 jobs and existing shared Ollama store. This is a feasibility and evidence report, not a new benchmark run.
 
-GPU feasibility below is grounded in completed Slurm runs and the repository's `vcggpu`/`rtx3090` job configuration. The current shell is a login node without `nvidia-smi`; current free GPU slots were not confirmed in this read-only pass.
+GPU feasibility below is grounded in completed Slurm runs and Slurm node features. At the 2026-10-27 availability check, all three Ada nodes had 5/7 GPUs allocated (six free total); the A5000 node had 7/8 allocated (one free); and the two RTX 3090 nodes had 7/8 and 4/4 allocated (one free total). Pending jobs in `gpu` and `vcggpu` were held or dependency-limited, with none waiting for GPU resources. This is a point-in-time snapshot, not a reservation or guarantee. The current shell is a login node without `nvidia-smi`; GPU access is through Slurm.
 
 ## Main finding
 
