@@ -124,6 +124,35 @@ def reason_for_unproductive_steps(path: Path, step_limit: int) -> dict[str, Any]
     return None
 
 
+def reason_for_context_threshold(path: Path, prompt_limit: int) -> dict[str, Any] | None:
+    if prompt_limit <= 0:
+        return None
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+    maximum = 0
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "step_finish":
+            continue
+        part = event.get("part") or {}
+        tokens = part.get("tokens") or {}
+        cache = tokens.get("cache") or {}
+        prompt = int(tokens.get("input", 0)) + int(cache.get("read", 0))
+        maximum = max(maximum, prompt)
+    if maximum >= prompt_limit:
+        return {
+            "reason": "OpenCode prompt usage reached the configured pre-overflow safety threshold",
+            "max_prompt_tokens": maximum,
+            "prompt_token_stop_limit": prompt_limit,
+        }
+    return None
+
+
 def reason_for_repeated_operation(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
     eligible = {"bash", "shell", "read", "grep"}
     recent = [call for call in calls[-10:] if call["tool"] in eligible]
@@ -281,7 +310,10 @@ def stop_opencode(harbor_pid: int) -> bool:
 
 
 def stop_reason(
-    calls: list[dict[str, Any]], event_file: Path, no_progress_steps: int
+    calls: list[dict[str, Any]],
+    event_file: Path,
+    no_progress_steps: int,
+    max_prompt_tokens: int,
 ) -> dict[str, Any] | None:
     detectors = (
         reason_for_repeated_operation,
@@ -292,6 +324,9 @@ def stop_reason(
         reason = detector(calls)
         if reason is not None:
             return reason
+    context_reason = reason_for_context_threshold(event_file, max_prompt_tokens)
+    if context_reason is not None:
+        return context_reason
     return reason_for_unproductive_steps(event_file, no_progress_steps)
 
 
@@ -303,6 +338,7 @@ def main() -> int:
     parser.add_argument("--marker", type=Path, required=True)
     parser.add_argument("--interval", type=float, default=15.0)
     parser.add_argument("--no-progress-steps", type=int, default=8)
+    parser.add_argument("--max-prompt-tokens", type=int, default=0)
     args = parser.parse_args()
 
     previous_count = 0
@@ -320,7 +356,12 @@ def main() -> int:
                     flush=True,
                 )
                 previous_count = len(calls)
-            reason = stop_reason(calls, event_file, args.no_progress_steps)
+            reason = stop_reason(
+                calls,
+                event_file,
+                args.no_progress_steps,
+                args.max_prompt_tokens,
+            )
             if reason is not None:
                 reason.update(
                     event_file=str(event_file),

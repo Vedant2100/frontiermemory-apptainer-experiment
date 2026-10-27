@@ -15,6 +15,7 @@
 /results/target-task-source-sha256.txt
 /results/ollama-*
 /results/awilix-ab-*-harbor-exits.txt
+/results/codex-awilix-frontier-2026-10-26/
 
 # Cluster-only environments, caches, model files, and generated task copies.
 /.venv/

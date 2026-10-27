@@ -102,7 +102,10 @@ def main() -> int:
     # collector; the original verifier and official task remain untouched.
     collector_command = (
         "cd /app && mkdir -p /logs/artifacts && "
-        "git config --global --add safe.directory /app && git add -A && "
+        "git config --global --add safe.directory /app && "
+        # Harbor mounts environment.files at /app/files; it is runtime payload,
+        # not an agent edit, so keep it out of the benchmark patch.
+        "git add -A -- . ':!files' && "
         f"git diff --binary {base_commit} -- > /logs/artifacts/model.patch"
     )
     collector_pattern = re.compile(
