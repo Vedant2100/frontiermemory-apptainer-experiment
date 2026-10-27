@@ -49,6 +49,25 @@ grep -Fq "${EXPECTED_GPU}" "${RUN_DIR}/gpu.csv"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
 apptainer exec --fakeroot "${OLLAMA_SIF}" ollama --version >"${RUN_DIR}/ollama-version.txt" 2>&1
 .venv/bin/python scripts/stage_word2vec_task_for_apptainer.py --source "${SOURCE_TASK}" --output "${TASK_PATH}" --agent-image "${AGENT_SIF}" --verifier-image "${VERIFIER_SIF}" >"${RUN_DIR}/task-staging.json"
+.venv/bin/python - "${TASK_PATH}/task.toml" "${RUN_DIR}/task-staging.json" "${RUN_DIR}/staged-task-preflight.json" <<'PY'
+import json, pathlib, sys, tomllib
+task_path, staging_path, output_path = map(pathlib.Path, sys.argv[1:])
+task = tomllib.loads(task_path.read_text(encoding="utf-8"))
+staging = json.loads(staging_path.read_text(encoding="utf-8"))
+verifier = task["verifier"]["environment"]
+if verifier.get("network_mode") != "public":
+    raise SystemExit("Apptainer preflight: verifier network_mode must be staged as public")
+if staging.get("network_egress_isolation_enforced") is not False:
+    raise SystemExit("Apptainer preflight: missing explicit network-isolation limitation")
+summary = {
+    "task": task["task"]["name"],
+    "declared_artifacts": task.get("artifacts", []),
+    "verifier_network_mode": verifier["network_mode"],
+    "network_egress_isolation_enforced": False,
+    "preflight": "passed",
+}
+output_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+PY
 cp configs/openhands-word2vec-base-template.j2 "${PROMPT_TEMPLATE}"
 if [[ "${CONDITION}" == B ]]; then printf '\n\n## Historical experience memory\n\n' >>"${PROMPT_TEMPLATE}"; cat "${MEMORY_FILE}" >>"${PROMPT_TEMPLATE}"; sha256sum "${MEMORY_FILE}" >"${RUN_DIR}/memory-sha256.txt"; fi
 sha256sum "${PROMPT_TEMPLATE}" >"${RUN_DIR}/prompt-template-sha256.txt"
@@ -63,7 +82,10 @@ test -x "${VENV_SOURCE}/bin/python" && test -x "${PYTHON_SOURCE}/bin/python3.12"
 # own /opt/harbor-server venv. Reuse the already-installed OpenHands venv and
 # standalone Python through binds, so neither package installation nor image
 # rebuild is needed inside the task container.
-MOUNTS_JSON="$(.venv/bin/python -c 'import json,sys; v,p=sys.argv[1:]; print(json.dumps([{"type":"bind","source":v,"target":"/opt/openhands-sdk-venv"},{"type":"bind","source":p,"target":p},{"type":"bind","source":v,"target":"/opt/harbor-server"},{"type":"bind","source":p+"/bin/python3.12","target":"/usr/bin/python3"}]))' "${VENV_SOURCE}" "${PYTHON_SOURCE}")"
+# The singularity wrapper already binds the OpenHands venv at
+# /opt/openhands-sdk-venv. Do not add it twice; Harbor also needs the same
+# existing venv at /opt/harbor-server for its offline bootstrap.
+MOUNTS_JSON="$(.venv/bin/python -c 'import json,sys; v,p=sys.argv[1:]; print(json.dumps([{"type":"bind","source":p,"target":p},{"type":"bind","source":v,"target":"/opt/harbor-server"},{"type":"bind","source":p+"/bin/python3.12","target":"/usr/bin/python3"}]))' "${VENV_SOURCE}" "${PYTHON_SOURCE}")"
 printf '%s\n' "${MOUNTS_JSON}" >"${RUN_DIR}/environment-mounts.json"
 apptainer exec --fakeroot --writable-tmpfs --containall --no-mount home,tmp,bind-paths --bind "${VENV_SOURCE}:/opt/openhands-sdk-venv" --bind "${VENV_SOURCE}:/opt/harbor-server" --bind "${PYTHON_SOURCE}:${PYTHON_SOURCE}" --bind "${PYTHON_SOURCE}/bin/python3.12:/usr/bin/python3" "${AGENT_SIF}" /bin/bash -c '/usr/bin/python3 --version && /opt/harbor-server/bin/python3 -c "import fastapi,uvicorn; print(\"harbor-server-runtime\",fastapi.__version__,uvicorn.__version__)" && /opt/openhands-sdk-venv/bin/python -c "import openhands.sdk, openhands.tools; print(\"openhands-sdk\", openhands.sdk.__version__)"' >"${RUN_DIR}/openhands-runtime-preflight.txt" 2>&1
 COMMON_ARGS=(--path "${TASK_PATH}" --env singularity --mounts-json "${MOUNTS_JSON}" --jobs-dir jobs --job-name "${HARBOR_JOB_NAME}" --agent openhands-sdk --model "${MODEL_API_NAME}" --agent-kwarg "prompt_template_path=${PROMPT_TEMPLATE}" --agent-kwarg "reasoning_effort=${REASONING_EFFORT}" --agent-kwarg temperature=0.1 --agent-kwarg load_skills=false --agent-kwarg max_iterations=30 --agent-kwarg python_version=3.12 --agent-env LLM_API_KEY=local-ollama-no-auth --agent-env LLM_BASE_URL=http://127.0.0.1:11434/v1 --agent-env "LITELLM_EXTRA_BODY=${LITELLM_EXTRA_BODY}" --n-attempts 1 --n-concurrent 1 --agent-timeout-multiplier 1.0 --agent-setup-timeout-multiplier 0.5 --yes)

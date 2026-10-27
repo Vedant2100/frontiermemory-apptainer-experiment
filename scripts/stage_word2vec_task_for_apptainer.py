@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -21,7 +22,7 @@ def set_section_key(text: str, section_name: str, key: str, value: str) -> str:
     body_end = body_start + next_section.start() if next_section else len(text)
     body = text[body_start:body_end]
     replacement = f"{key} = {json.dumps(value)}"
-    key_pattern = re.compile(rf"(?m)^\s*{re.escape(key)}\s*=.*$")
+    key_pattern = re.compile(rf"(?m)^[ \t]*{re.escape(key)}\s*=.*$")
     if key_pattern.search(body):
         body = key_pattern.sub(replacement, body, count=1)
     else:
@@ -61,6 +62,20 @@ def main() -> int:
         "docker_image",
         str(args.verifier_image.resolve()),
     )
+    source_config = tomllib.loads(text)
+    original_verifier_network_mode = source_config["verifier"]["environment"].get(
+        "network_mode", "public"
+    )
+    # Harbor's Singularity backend rejects no-network even when the verifier
+    # itself needs no external services. Adapt only the disposable local task
+    # copy; this cannot enforce egress isolation and must be reported as a
+    # nonstandard Apptainer evaluation.
+    text = set_section_key(
+        text,
+        "verifier.environment",
+        "network_mode",
+        "public",
+    )
     (destination / "task.toml").write_text(text, encoding="utf-8")
 
     config = tomllib.loads(text)
@@ -69,6 +84,7 @@ def main() -> int:
         config["verifier"]["environment"]["docker_image"]
         == str(args.verifier_image.resolve())
     )
+    assert config["verifier"]["environment"]["network_mode"] == "public"
     print(
         json.dumps(
             {
@@ -77,8 +93,20 @@ def main() -> int:
                 "task_name": config["task"]["name"],
                 "agent_image": config["environment"]["docker_image"],
                 "verifier_image": config["verifier"]["environment"]["docker_image"],
-                "official_task_files_copied_verbatim": True,
-                "only_task_toml_image_paths_adapted": True,
+                "official_task_payload_files_copied_verbatim": True,
+                "task_toml_runtime_adaptations": {
+                    "local_agent_and_verifier_image_paths": True,
+                    "verifier_network_mode": {
+                        "official": original_verifier_network_mode,
+                        "staged": "public",
+                        "reason": "Harbor Singularity rejects no-network",
+                    },
+                },
+                "network_egress_isolation_enforced": False,
+                "source_task_toml_sha256": hashlib.sha256(task_file.read_bytes()).hexdigest(),
+                "staged_task_toml_sha256": hashlib.sha256(
+                    (destination / "task.toml").read_bytes()
+                ).hexdigest(),
             },
             indent=2,
         )
