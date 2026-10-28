@@ -332,3 +332,10 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
   the file was produced. Phase 4 was not started.
 - Unresolved: Harbor's 1200 s timeout message does not match the recorded ~600 s agent interval.
   Sanitized summary: `results/word2vec-openhands/smoke-v2-summary.md`.
+
+## 2026-10-28 — Word2Vec memory A/B v2 (job 301916)
+
+- Six trials A B B A A B on 2x RTX 3090 (49 min job; COMPLETED 0:0). Same model, harness, prompt template (sha `cc02f24b…`), and limits; B appended frozen memory v2 (sha `eb044c32…`).
+- Strict reward: A 0/3, B 0/3. Verifier collected tests: A 0/3 (two missing required callable, one NLTK import lookup error), B 3/3 (1/6 cases passed each).
+- Trial 4 ran 771 s, confirming the Singularity exec-timeout wrapper removed the 600 s cap.
+- Sanitized report: `results/word2vec-openhands/ab-v2-results.md`.
