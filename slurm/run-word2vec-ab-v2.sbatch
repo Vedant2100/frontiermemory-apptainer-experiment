@@ -36,6 +36,10 @@ PYTHON_SOURCE="${PWD}/runtime/uv/python/cpython-3.12-linux-x86_64-gnu"
 HARBOR_SHARED_BINDPATH="${PYTHON_SOURCE}:${PYTHON_SOURCE},${VENV_SOURCE}:/opt/harbor-server"
 BASE_TEMPLATE_SOURCE="${PWD}/configs/openhands-word2vec-base-template.j2"
 HELPER="${PWD}/scripts/word2vec_ab_v2_records.py"
+# Harbor 0.24.0 Singularity exec timeout correction (see protocol-v2.md amendment 2026-10-27).
+# Runs the Harbor CLI with a default exec timeout so the task agent timeout, not a hard 600 s HTTP cap, binds.
+HARBOR_WRAPPER="${PWD}/scripts/harbor_singularity_exec_timeout.py"
+export HARBOR_SINGULARITY_EXEC_TIMEOUT_SEC="${HARBOR_SINGULARITY_EXEC_TIMEOUT_SEC:-7200}"
 
 # Protocol v2 knobs. TRIAL_ORDER is a space-separated list of A/B tokens.
 TRIAL_ORDER="${TRIAL_ORDER:-A B B A A B}"
@@ -74,12 +78,14 @@ if [[ ! -s "${MODEL_MANIFEST}" ]]; then
   exit 3
 fi
 test -s "${OLLAMA_SIF}" && test -s "${AGENT_SIF}" && test -s "${VERIFIER_BASE_SIF}" && test -s "${VERIFIER_DEF}" && test -d "${MODEL_STORE}"
-test -s "${BASE_TEMPLATE_SOURCE}" && test -s "${HELPER}" && test -d "${SOURCE_TASK}"
+test -s "${BASE_TEMPLATE_SOURCE}" && test -s "${HELPER}" && test -s "${HARBOR_WRAPPER}" && test -d "${SOURCE_TASK}"
 mkdir -p "${RUN_DIR}/ollama" "${RUN_DIR}/preflight" "${BUILD_ROOT}" logs
 date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
 printf '%s\n' "${TRIAL_ORDER}" >"${RUN_DIR}/trial-order.txt"
 printf '%s\n' "${MAX_ITERATIONS}" >"${RUN_DIR}/max-iterations.txt"
 printf '%s\n' "${AGENT_TIMEOUT_SEC}" >"${RUN_DIR}/agent-timeout-sec.txt"
+sha256sum "${HARBOR_WRAPPER}" >"${RUN_DIR}/harbor-wrapper-sha256.txt"
+printf 'HARBOR_SINGULARITY_EXEC_TIMEOUT_SEC=%s\n' "${HARBOR_SINGULARITY_EXEC_TIMEOUT_SEC}" >"${RUN_DIR}/harbor-exec-timeout.txt"
 printf '%s  %s\n' "${ACTUAL_MEMORY_SHA}" "${FROZEN_MEMORY}" >"${RUN_DIR}/frozen-memory-sha256.txt"
 scontrol show job "${SLURM_JOB_ID}" >"${RUN_DIR}/slurm-job.txt"
 nvidia-smi -q >"${RUN_DIR}/nvidia-smi.txt"
@@ -187,13 +193,13 @@ run_trial() {
   mounts_json="$(.venv/bin/python -c 'import json,sys; p,w=sys.argv[1:]; print(json.dumps([{"type":"bind","source":p+"/bin/python3.12","target":"/usr/bin/python3"},{"type":"bind","source":w,"target":"/workspace"}]))' "${PYTHON_SOURCE}" "${workspace}")"
   printf '%s\n' "${mounts_json}" >"${tdir}/environment-mounts.json"
   local common_args=(--path "${task_path}" --env singularity --mounts-json "${mounts_json}" --jobs-dir jobs --job-name "${job_name}" --agent openhands-sdk --model "${MODEL_API_NAME}" --agent-kwarg "prompt_template_path=${prompt}" --agent-kwarg "reasoning_effort=${REASONING_EFFORT}" --agent-kwarg temperature=0.1 --agent-kwarg load_skills=false --agent-kwarg "max_iterations=${MAX_ITERATIONS}" --agent-kwarg python_version=3.12 --agent-env LLM_API_KEY=local-ollama-no-auth --agent-env LLM_BASE_URL=http://127.0.0.1:11434/v1 --agent-env "LITELLM_EXTRA_BODY=${LITELLM_EXTRA_BODY}" --n-attempts 1 --n-concurrent 1 --agent-timeout-multiplier 1.0 --agent-setup-timeout-multiplier 0.5 --yes)
-  APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" .venv/bin/harbor run "${common_args[@]}" --print-config >"${tdir}/harbor-resolved-config.json" 2>"${tdir}/harbor-config.log" || true
+  APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" .venv/bin/python "${HARBOR_WRAPPER}" run "${common_args[@]}" --print-config >"${tdir}/harbor-resolved-config.json" 2>"${tdir}/harbor-config.log" || true
   curl --fail --silent http://127.0.0.1:11434/api/ps >"${tdir}/loaded-model-before-trial.json" || true
 
   # Single official stop rule: Harbor's agent timeout (task.toml 1200 s). The hang guard only
   # protects the cluster job from a wedged container and is not a per-trial stop decision.
   set +e
-  APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" timeout --signal=INT --kill-after=60s "${TRIAL_HANG_GUARD}" .venv/bin/harbor run "${common_args[@]}" >"${tdir}/harbor.log" 2>&1
+  APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" timeout --signal=INT --kill-after=60s "${TRIAL_HANG_GUARD}" .venv/bin/python "${HARBOR_WRAPPER}" run "${common_args[@]}" >"${tdir}/harbor.log" 2>&1
   local harbor_exit=$?
   set -e
   printf '%s\n' "${harbor_exit}" >"${tdir}/harbor-exit-code.txt"

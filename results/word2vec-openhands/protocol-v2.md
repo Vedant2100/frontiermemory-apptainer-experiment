@@ -68,3 +68,17 @@ isolation is not enforced, and every result must say so.
 - **Smoke result (Phase 3).** Job `301912`, condition A, no memory. `/workspace/solution.py` was
   created, but the verifier collected 0 cases, so the gate FAILED. The agent hit the 1200 s timeout.
   Phase 4 was not started. Sanitized summary: `results/word2vec-openhands/smoke-v2-summary.md`.
+
+## Amendment 2026-10-27 (post-smoke, pre-A/B)
+
+Made after smoke job `301912` and before any Phase 4 trial ran. No B trial had run when these were made. Both changes apply identically to conditions A and B.
+
+- **(1) Harbor exec-timeout correction.** Harbor 0.24.0's Singularity `exec` applies a hard 600 s HTTP timeout when no `timeout_sec` is passed. The OpenHands agent session runs inside one such call, so the smoke trial was cut at 600 s and reported as `AgentTimeoutError` at 1200 s. `scripts/harbor_singularity_exec_timeout.py` runs the Harbor CLI and gives calls without an explicit timeout a default of `HARBOR_SINGULARITY_EXEC_TIMEOUT_SEC` (7200 s). The task's 1200 s agent timeout is then the binding limit. The runner records the wrapper sha256 and the timeout value in the run directory. The outer hang guard stays at 2400 s, which exceeds 1200 s plus setup and verifier time. The wrapped Phase 1 oracle check (`slurm/check-word2vec-oracle-collection-wrapped.sbatch`) is the regression test for this change. Nothing else in the runner changed.
+- **(2) Validity rule D5'.** This supersedes the D5 sentence "zero collected cases makes a trial INVALID, never a score of 0". The oracle check (`301906`, and its wrapped rerun) shows the pipeline collects and scores correctly, so agent-caused failures are now scored, as in the official strict scoring:
+  - Missing artifact: `NO_ARTIFACT`, strict reward 0, 0 of 6 cases.
+  - Collection error caused by the agent's callable or contract: `CONTRACT_COLLECTION_ERROR`, strict reward 0, 0 of 6 cases.
+  - Failing tests: `TESTS_FAILED`, strict reward 0, cases passed counted.
+  - All six cases passing with reward 1: `PASS`.
+  - `INVALID_INFRA` is reserved for infrastructure faults only: preflight or hash failure, model server not serving, hang guard firing, Harbor exception other than `AgentTimeoutError`, verifier not executed, or no model activity. `AgentTimeoutError` is a valid, scored outcome.
+  - Per-trial metrics: strict reward (primary, official), cases passed out of 6 (secondary), failure category, and a `valid` flag.
+  - The smoke trial `301912` (condition A, no memory) is re-derived under D5' as a valid FAIL with category `CONTRACT_COLLECTION_ERROR`. Its original record is kept unchanged.

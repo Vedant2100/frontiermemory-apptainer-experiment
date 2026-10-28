@@ -4,10 +4,16 @@
 Writes only counts and status fields. It never copies trajectory text, verifier
 output, commands, memory text, or workspace contents into the records.
 
+Validity and scoring follow protocol-v2.md, decision D5' (amendment 2026-10-27):
+  - Agent-caused failures are scored (strict reward 0), never INVALID.
+  - INVALID_INFRA is reserved for infrastructure faults: hang guard, Harbor
+    exception other than AgentTimeoutError, missing result or verifier output,
+    nonzero Harbor exit without a timeout, or no model activity at all.
+
 Subcommands:
   check-task      validate a staged task copy and write staged-task-preflight.json
   base-template   build the shared base prompt header from staged metadata
-  trial-record    write one sanitized trial-record.json
+  trial-record    write one sanitized trial-record.json (or --output path)
   aggregate       write trials-summary.json and trials-summary.csv for a job
 """
 
@@ -19,6 +25,7 @@ import json
 import re
 import sys
 import tomllib
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +33,14 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 SUMMARY = re.compile(r"^=+ (.*?) in [0-9.]+s", re.M)
 COUNT = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed|deselected)")
 COLLECTED = re.compile(r"collected (\d+) items?")
+COLLECTION_ERROR = re.compile(r"ERROR collecting|errors? during collection")
+
+SCHEMA = "word2vec-ab-v2-trial-record/2"
+CASES_TOTAL = 6  # verifier test cases in build-word2vec-pipeline
+AGENT_TIMEOUT_EXCEPTION = "AgentTimeoutError"
+# GNU timeout exits 124 after SIGINT; 137 if --kill-after had to SIGKILL the process.
+HANG_GUARD_EXIT_CODES = {124, 137}
+CATEGORIES = ("PASS", "TESTS_FAILED", "CONTRACT_COLLECTION_ERROR", "NO_ARTIFACT", "INVALID_INFRA")
 
 
 def read_json(path: Path):
@@ -89,8 +104,8 @@ def cmd_base_template(args: argparse.Namespace) -> int:
 # -------------------------------------------------------------- trial-record
 def parse_verifier(path: Path) -> dict:
     if not path.is_file():
-        return {"collected": 0, "passed": 0, "failed": 0, "errors": 0, "skipped": 0,
-                "parse_note": "verifier output absent"}
+        return {"output_present": False, "collected": 0, "passed": 0, "failed": 0, "errors": 0,
+                "skipped": 0, "collection_error": False, "parse_note": "verifier output absent"}
     text = ANSI.sub("", path.read_text(encoding="utf-8", errors="replace"))
     counts = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0, "xfailed": 0, "xpassed": 0}
     notes = []
@@ -110,9 +125,10 @@ def parse_verifier(path: Path) -> dict:
     else:
         collected = counts["passed"] + counts["failed"] + counts["skipped"] + counts["xfailed"] + counts["xpassed"]
         notes.append("collected count inferred from summary")
-    return {"collected": collected, "passed": counts["passed"], "failed": counts["failed"],
-            "errors": counts["errors"], "skipped": counts["skipped"],
-            "parse_note": "; ".join(notes) or None}
+    collection_error = bool(COLLECTION_ERROR.search(text)) or (collected == 0 and counts["errors"] > 0)
+    return {"output_present": True, "collected": collected, "passed": counts["passed"],
+            "failed": counts["failed"], "errors": counts["errors"], "skipped": counts["skipped"],
+            "collection_error": collection_error, "parse_note": "; ".join(notes) or None}
 
 
 def classify_steps(steps: list[dict]) -> dict:
@@ -151,13 +167,39 @@ def count_effort_requests(body_dir: Path, marker: Path, effort: str) -> tuple[in
     return total, matched
 
 
+def categorize(*, harbor_exit, raw_result, exc_type, has_exception, reward, verifier,
+               artifact_present, agent_steps, model_requests, expect_model=True):
+    """Return (failure_category, invalid_reason) under D5'."""
+    if harbor_exit in HANG_GUARD_EXIT_CODES:
+        return "INVALID_INFRA", "hang_guard_fired"
+    if raw_result is None:
+        return "INVALID_INFRA", "harbor_result_missing"
+    if has_exception and exc_type != AGENT_TIMEOUT_EXCEPTION:
+        return "INVALID_INFRA", f"harbor_exception:{exc_type}"
+    if harbor_exit != 0 and not has_exception:
+        return "INVALID_INFRA", "harbor_exit_nonzero"
+    if not verifier["output_present"] and reward is None:
+        return "INVALID_INFRA", "verifier_not_executed"
+    if reward is None:
+        return "INVALID_INFRA", "verifier_reward_missing"
+    if expect_model and agent_steps == 0 and model_requests == 0:
+        return "INVALID_INFRA", "no_model_activity"
+    if not artifact_present:
+        return "NO_ARTIFACT", None
+    if verifier["collection_error"] or verifier["collected"] == 0:
+        return "CONTRACT_COLLECTION_ERROR", None
+    if reward >= 1.0:
+        return "PASS", None
+    return "TESTS_FAILED", None
+
+
 def cmd_trial_record(args: argparse.Namespace) -> int:
     trial_dir = Path(args.trial_dir)
     job_dir = Path(args.job_dir)
     harbor_trials = [p for p in sorted(job_dir.glob("*")) if p.is_dir()] if job_dir.is_dir() else []
     harbor_trial = harbor_trials[0] if harbor_trials else None
-    result = read_json(harbor_trial / "result.json") if harbor_trial else None
-    result = result or {}
+    raw_result = read_json(harbor_trial / "result.json") if harbor_trial else None
+    result = raw_result or {}
 
     workspace_solution = trial_dir / "workspace" / "solution.py"
     solution_present = workspace_solution.is_file() and workspace_solution.stat().st_size > 0
@@ -186,12 +228,13 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
         "terminal_actions": 0, "last_agent_step_has_tool_calls": False}
 
     agent_exec = result.get("agent_execution") or {}
-    agent_wall = parse_seconds(agent_exec.get("started_at"), agent_exec.get("finished_at"))
+    agent_execution_sec = parse_seconds(agent_exec.get("started_at"), agent_exec.get("finished_at"))
     trial_wall = parse_seconds(result.get("started_at"), result.get("finished_at"))
     exc = result.get("exception_info")
+    exc_type = (exc.get("exception_type") if isinstance(exc, dict) else None) if exc else None
     exc_text = json.dumps(exc).lower() if exc else ""
 
-    if (agent_wall is not None and agent_wall >= args.agent_timeout_sec - 5) or "timeout" in exc_text:
+    if (agent_execution_sec is not None and agent_execution_sec >= args.agent_timeout_sec - 5) or "timeout" in exc_text:
         termination = "timeout"
     elif step_counts["agent_steps"] >= args.max_iterations:
         termination = "max_iterations"
@@ -215,27 +258,59 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
         tok_cached = final_metrics.get("total_cached_tokens")
         tok_out = final_metrics.get("total_completion_tokens")
         tok_source = "openhands_trajectory_final_metrics" if tok_in is not None else None
-    collected = verifier["collected"]
     total_requests, effort_requests = count_effort_requests(
         Path(args.body_dir), Path(args.marker), args.reasoning_effort)
 
+    try:
+        harbor_exit_code = int(args.harbor_exit)
+    except ValueError:
+        harbor_exit_code = None
+
+    category, invalid_reason = categorize(
+        harbor_exit=harbor_exit_code, raw_result=raw_result, exc_type=exc_type,
+        has_exception=bool(exc), reward=reward, verifier=verifier,
+        artifact_present=solution_present, agent_steps=step_counts["agent_steps"],
+        model_requests=total_requests, expect_model=not args.no_model_expected)
+    valid = category != "INVALID_INFRA"
+    if not valid:
+        strict_reward = None
+        cases_passed = None
+    else:
+        strict_reward = 1.0 if category == "PASS" else 0.0
+        if category in ("NO_ARTIFACT", "CONTRACT_COLLECTION_ERROR"):
+            cases_passed = 0
+        else:
+            cases_passed = min(verifier["passed"], CASES_TOTAL)
+
+    memory_sha = None
+    memory_sha_file = trial_dir / "memory-sha256.txt"
+    if memory_sha_file.is_file():
+        memory_sha = memory_sha_file.read_text(encoding="utf-8").split()[0]
+
     record = {
-        "schema": "word2vec-ab-v2-trial-record/1",
+        "schema": SCHEMA,
         "job_id": args.job_id,
         "trial_index": args.index,
         "condition": args.condition,
         "harbor_job_name": args.job_name,
-        "harbor_exit_code": int(args.harbor_exit) if str(args.harbor_exit).lstrip("-").isdigit() else args.harbor_exit,
-        "artifact_solution_py_present": solution_present,
-        "harbor_artifact_status": harbor_artifact_status,
-        "verifier_collected": collected,
+        "harbor_exit_code": harbor_exit_code if harbor_exit_code is not None else args.harbor_exit,
+        "valid": valid,
+        "failure_category": category,
+        "invalid_reason": invalid_reason,
+        "strict_reward": strict_reward,
+        "cases_passed_of_6": cases_passed,
+        "cases_total": CASES_TOTAL,
+        "verifier_collected": verifier["collected"],
         "verifier_passed": verifier["passed"],
         "verifier_failed": verifier["failed"],
         "verifier_errors": verifier["errors"],
+        "verifier_collection_error": verifier["collection_error"],
         "verifier_parse_note": verifier.get("parse_note"),
-        "reward": reward,
-        "status": "VALID" if collected > 0 else "INVALID",
-        "agent_wall_seconds": agent_wall,
+        "reward_raw": reward,
+        "artifact_solution_py_present": solution_present,
+        "harbor_artifact_status": harbor_artifact_status,
+        "harbor_exception_type": exc_type,
+        "agent_execution_sec": agent_execution_sec,
         "trial_wall_seconds": trial_wall,
         "termination_reason": termination,
         "model_requests": total_requests,
@@ -248,19 +323,45 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
         "file_edit_actions": step_counts["file_edit_actions"],
         "test_or_python_executions": step_counts["test_or_python_executions"],
         "terminal_actions": step_counts["terminal_actions"],
+        "reasoning_effort": args.reasoning_effort,
         "max_iterations": args.max_iterations,
         "agent_timeout_sec": args.agent_timeout_sec,
         "base_template_sha256": args.base_sha,
         "final_template_sha256": args.final_sha,
+        "memory_sha256": memory_sha,
         "network_egress_isolation_enforced": False,
     }
-    (trial_dir / "trial-record.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({k: record[k] for k in ("trial_index", "condition", "status", "termination_reason",
-                                             "verifier_collected", "reward")}))
+    out_path = Path(args.output) if args.output else trial_dir / "trial-record.json"
+    out_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({k: record[k] for k in ("trial_index", "condition", "valid", "failure_category",
+                                             "strict_reward", "cases_passed_of_6", "termination_reason")}))
     return 0
 
 
 # ----------------------------------------------------------------- aggregate
+def _mean(values: list) -> float | None:
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def arm_summary(records: list[dict]) -> dict:
+    summary = {}
+    for condition in ("A", "B"):
+        arm = [r for r in records if r["condition"] == condition]
+        valid = [r for r in arm if r["valid"]]
+        summary[condition] = {
+            "trials": len(arm),
+            "valid": len(valid),
+            "strict_passes": sum(1 for r in valid if r["strict_reward"] == 1.0),
+            "mean_cases_passed_of_6": _mean([r["cases_passed_of_6"] for r in valid]),
+            "failure_categories": dict(Counter(r["failure_category"] for r in arm)),
+            "mean_agent_execution_sec": _mean([r["agent_execution_sec"] for r in valid]),
+            "mean_input_tokens": _mean([r["input_tokens"] for r in valid]),
+            "mean_output_tokens": _mean([r["output_tokens"] for r in valid]),
+        }
+    return summary
+
+
 def cmd_aggregate(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir)
     records = []
@@ -268,7 +369,8 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
         records.append(json.loads(path.read_text(encoding="utf-8")))
     records.sort(key=lambda r: r["trial_index"])
     (run_dir / "trials-summary.json").write_text(
-        json.dumps({"job_id": args.job_id, "trial_order": args.trial_order, "trials": records}, indent=2) + "\n",
+        json.dumps({"job_id": args.job_id, "trial_order": args.trial_order, "trials": records,
+                    "arms": arm_summary(records)}, indent=2) + "\n",
         encoding="utf-8")
     if records:
         fields = list(records[0].keys())
@@ -310,6 +412,9 @@ def main() -> int:
     p.add_argument("--final-sha", required=True)
     p.add_argument("--body-dir", required=True)
     p.add_argument("--marker", required=True)
+    p.add_argument("--no-model-expected", action="store_true",
+                   help="for non-LLM agents such as Harbor oracle or nop; disables the no_model_activity rule")
+    p.add_argument("--output", help="write the record here instead of <trial-dir>/trial-record.json")
     p.set_defaults(func=cmd_trial_record)
 
     p = sub.add_parser("aggregate")
