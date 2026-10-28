@@ -3,7 +3,7 @@
 #SBATCH --partition=batch
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
-#SBATCH --time=01:00:00
+#SBATCH --time=03:00:00
 #SBATCH --output=logs/word2vec-codex-trial-%j.out
 #SBATCH --error=logs/word2vec-codex-trial-%j.err
 # Codex CLI harness trial for the Word2Vec task (model gpt-reserve, reasoning medium).

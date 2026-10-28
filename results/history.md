@@ -346,3 +346,10 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - Smoke job `302065` (condition A, `gpt-reserve`, reasoning medium) completed with exit 0:0 in 1m36s. Codex finished in 41 s with one turn. `/workspace/solution.py` was produced, but the verifier collected 0 cases (a contract collection error). This is a valid FAIL, strict reward 0, and the Phase 3 smoke gate did not pass. There was no retry.
 - Not disabled: web search. The `web_search_mode` key was ignored by this Codex build, so the trial ran with Codex's default web-search setting. Recorded as a deviation.
 - Sanitized summary: `results/word2vec-openhands/codex-smoke-summary.md`. Raw outputs stay local and git-ignored under `results/word2vec-openhands/codex-v2/job-302065/`.
+
+## 2026-10-28 — Codex CLI Word2Vec memory A/B, six trials (job 302067)
+
+- Six trials `A B B A A B` in one job (COMPLETED 0:0, 7m35s). Harness Codex CLI 0.157.0-alpha.11.1, model `gpt-reserve`, reasoning medium, container-isolated workspace and private CODEX_HOME per trial. B delivers the frozen v2 memory (sha `eb044c32…`) as global `AGENTS.md`; A has none. Prompt sha `61ba8b92…` identical in all six.
+- Strict reward: A 0/3, B 0/3. Verifier collected tests: A 0/3 (contract collection errors), B 3/3 (1/6 cases passed each). Same pattern as the OpenHands/Qwen A/B (job 301916).
+- No web or MCP events observed. No timeouts. Auth not refreshed.
+- Sanitized report: `results/word2vec-openhands/codex-ab-results.md`. Slurm time limit for the runner raised from 1 h to 3 h.
