@@ -319,3 +319,16 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - Added `slurm/check-word2vec-oracle-collection.sbatch`, a CPU-only check on the `batch` partition. It stages a fresh task copy per trial, runs the same verifier-image and test-hash preflight as the Ada runner, then runs Harbor's built-in `oracle` agent and `nop` agent with the same Apptainer mounts. No model, Ollama, or GPU was used.
 - Slurm job `301906` completed with exit 0 in 1m32s. The oracle trial produced `/workspace/solution.py`, collected 6 verifier cases, passed all 6, and got reward 1. The nop trial produced no artifact, had a collection error with 0 cases collected, and got reward 0, which the protocol treats as INVALID.
 - Gate passed without resubmission. Sanitized status is in `results/word2vec-openhands/oracle-check-summary.md`. Raw trials, logs, and staged copies stay local and git-ignored.
+
+## Word2Vec protocol v2 Phase 3 smoke (2026-10-27)
+
+- Added `slurm/run-word2vec-ab-v2.sbatch` (new runner, one Ollama load per job, sequential trials
+  in `TRIAL_ORDER`, fresh staged task and workspace per trial, `max_iterations` 200) and
+  `scripts/word2vec_ab_v2_records.py` (sanitized per-trial records and job aggregation). The
+  existing runners are unchanged.
+- Smoke job `301912` (`TRIAL_ORDER=A`) completed with exit 0:0 in 11m15s. Harbor reported an agent
+  timeout at 1200 s. `/workspace/solution.py` was created, but the verifier collected 0 cases
+  (a task-contract collection error), so the Phase 3 gate FAILED. No resubmission was made because
+  the file was produced. Phase 4 was not started.
+- Unresolved: Harbor's 1200 s timeout message does not match the recorded ~600 s agent interval.
+  Sanitized summary: `results/word2vec-openhands/smoke-v2-summary.md`.
