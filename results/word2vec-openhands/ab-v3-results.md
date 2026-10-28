@@ -65,3 +65,18 @@ Across 9 no-memory trials on two stacks, none passed. With memory v3, all 3 tria
 - Researcher degree of freedom: the v3 pipeline was designed after the v2 results. By then the lead knew from verifier errors which callable was required. The v3 prompts ask generically for interfaces and signatures and never name the callable. The memory model recovered it from the trajectories, and every recipe line cites PASS steps.
 - Validity rule D5' and the Harbor Singularity exec-timeout wrapper apply as in job 301916. The verifier network mode is `public`; egress isolation is not enforced.
 - Raw trajectories, generated code, memory text and verifier output stay local.
+
+## Replication (Slurm job 302125)
+
+The same frozen memory v3 (sha256 `fe61fdff…`), runner, settings, and A B B A A B order, rerun as a second job. The prompt template sha `cc02f24b…` was identical in all trials.
+
+| # | Arm | Outcome | Strict | Cases / 6 | Agent s | Requests | Output tok |
+|---|---|---|---|---|---|---|---|
+| 1 | A | collection error: required callable missing | 0 | 0 | 490 | 27 | 15,622 |
+| 2 | B | PASS | 1 | 6 | 121 | 17 | 5,582 |
+| 3 | B | PASS | 1 | 6 | 51 | 4 | 2,029 |
+| 4 | A | collection error: required callable missing | 0 | 0 | 698 | 39 | 29,851 |
+| 5 | A | collection error: NLTK resource lookup at import | 0 | 0 | 281 | 25 | 11,447 |
+| 6 | B | PASS | 1 | 6 | 75 | 9 | 3,167 |
+
+**Combined over jobs 302098 and 302125:** A 0/6 strict, B 6/6 strict. Two-sided Fisher exact p = 0.0022. B used 3–8x less agent time and output tokens. This is still the non-compliant upper bound described above.

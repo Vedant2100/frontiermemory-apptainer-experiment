@@ -369,3 +369,7 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - Declared artifact `/root/network_stats.csv`; working directory `/root`, so no workspace bind is needed. Agent timeout 5400 s, verifier timeout 600 s. Verifier network staged as `public` (no-network unsupported by Singularity; egress isolation not enforced).
 - Added `slurm/build-dapt-apptainer-images.sbatch`, `slurm/check-dapt-oracle-collection.sbatch`, and the `.def` files. Job `302130` passed the gate: oracle reward 1 with 37 of 37 cases passing; nop reward 0 with 37 failed.
 - Sanitized summary: `results/frontiermemory-dapt/oracle-check-summary.md`. Raw trials stay local and git-ignored under `results/frontiermemory-dapt/oracle-check-*/`.
+
+## 2026-10-28 — Memory v3 replication (job 302125)
+
+- Same setup as 302098. A 0/3, B 3/3 (6/6 cases each). Combined A 0/6 vs B 6/6, Fisher p = 0.0022. Still a non-compliant upper bound (v3 reconstructs prior PASS artifacts).
