@@ -94,7 +94,26 @@ summary = {
 }
 output_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 PY
-cp configs/openhands-word2vec-base-template.j2 "${PROMPT_TEMPLATE}"
+.venv/bin/python - "${RUN_DIR}/staged-task-preflight.json" configs/openhands-word2vec-base-template.j2 "${PROMPT_TEMPLATE}" <<'PY'
+import json, pathlib, sys
+
+metadata_path, source_path, output_path = map(pathlib.Path, sys.argv[1:])
+metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+artifacts = metadata.get("declared_artifacts", [])
+if not artifacts:
+    raise SystemExit("Task metadata declares no output artifacts; refusing to launch an agent run")
+if any(not isinstance(path, str) or not path.startswith("/workspace/") for path in artifacts):
+    raise SystemExit(f"Unexpected artifact path(s): {artifacts!r}")
+header = (
+    "## Required output artifacts\n\n"
+    "The official task metadata declares these files as required outputs. "
+    "Create the implementation at each exact path so Harbor can collect it:\n"
+    + "".join(f"- `{path}`\n" for path in artifacts)
+    + "\n"
+)
+output_path.write_text(header + source_path.read_text(encoding="utf-8"), encoding="utf-8")
+PY
+sha256sum "${PROMPT_TEMPLATE}" >"${RUN_DIR}/base-prompt-template-sha256.txt"
 if [[ "${CONDITION}" == B ]]; then printf '\n\n## Historical experience memory\n\n' >>"${PROMPT_TEMPLATE}"; cat "${MEMORY_FILE}" >>"${PROMPT_TEMPLATE}"; sha256sum "${MEMORY_FILE}" >"${RUN_DIR}/memory-sha256.txt"; fi
 sha256sum "${PROMPT_TEMPLATE}" >"${RUN_DIR}/prompt-template-sha256.txt"
 printf '%s\n' "${MODEL}" >"${RUN_DIR}/model.txt"

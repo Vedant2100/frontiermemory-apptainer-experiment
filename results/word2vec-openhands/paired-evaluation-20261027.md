@@ -1,6 +1,6 @@
 # FrontierMemory Word2Vec exploratory pair
 
-**Status:** Both conditions ran to the OpenHands 30-iteration limit and produced code, but the original verifier could not collect tests. Harbor's reward of `0` is therefore not a functional test score, and this pair does not establish a memory benefit or harm.
+**Status:** Both conditions ran to the OpenHands 30-iteration limit and produced code, but neither produced the task's required output artifact. The verifier collected zero tests. Harbor's reward of `0` is not a functional score, and this pair does not establish a memory benefit or harm.
 
 ## Matched setup
 
@@ -27,9 +27,9 @@
 | Original verifier cases collected | 0 | 0 |
 | Required artifact collected | No | No |
 
-A wrote `word2vec_model.py` and generated model/config/vocabulary artifacts. Its inline self-test eventually printed `OK`. B wrote `word2vec_component.py` and a saved model; its inline smoke checks eventually passed. B also tried to create a permanent test suite after reading the memory's testing advice, but the destination directory was absent, so that file write failed. Neither condition produced the task's declared `/workspace/solution.py`; Harbor's artifact collector consequently had no solution file to collect, and the original verifier stopped during test collection. These are task-output failures, not container startup failures.
+A wrote `word2vec_model.py` and generated model/config/vocabulary artifacts. Its inline self-test eventually printed `OK`. B wrote `word2vec_component.py` and a saved model; its inline smoke checks eventually passed. B also tried to create a permanent test suite after reading the memory's testing advice, but the destination directory was absent, so that file write failed. Neither condition produced the task's declared `/workspace/solution.py`; Harbor therefore had no required solution file to collect, and the original verifier collected zero test cases. The verifier image started, but the evaluation handoff failed before functional scoring.
 
-As a separate, nonstandard diagnostic, A's saved source was copied unchanged to a replay workspace under the declared filename and run against the same original verifier image. Collection still stopped because the implementation did not meet the required callable contract. This replay is not counted as A's benchmark score. B's original verifier run stopped at the missing artifact path; its source and workspace are preserved locally.
+As a separate, nonstandard diagnostic, A's saved source was copied unchanged to a replay workspace under the declared filename and run against the same original verifier image. Collection still stopped because the implementation did not meet the task's callable contract. This replay is not counted as A's benchmark score. B's original verifier run stopped at the missing artifact path; its source and workspace are preserved locally.
 
 ## Memory provenance and observed behavior
 
@@ -39,6 +39,10 @@ The frozen memory contains schema/API integration and test-workflow lessons, not
 
 ## Interpretation and limits
 
-The local model and harness can edit files, run custom smoke checks, save artifacts, and reach the verifier. The limiting issue in these two runs was following the task's callable/artifact contract. The verifier environment itself started correctly, and the original test files were embedded without modification. Since neither run reached functional cases, the lower B runtime and output-token count are not evidence of improved efficiency. The memory was also only indirectly relevant. No leaderboard claim is made.
+The agent and verifier containers started, but the evaluation runner had a preventable configuration defect: although preflight recorded the task's declared artifact path, the shared A/B prompt wrapper did not tell the agent to create it. The agent also did not independently infer the required path. The separate replay indicates that simply renaming A's output would not have made it pass; its implementation still failed collection. The original verifier files were embedded unchanged. Since neither run reached functional cases, the lower B runtime and output-token count are not evidence of improved efficiency. The memory was only indirectly relevant. No leaderboard claim is made.
+
+## Follow-up runner repair
+
+After these runs, the shared runner was changed to build the prompt header from the staged task metadata's `declared_artifacts` list. Both conditions receive the same exact-path instruction before the task prompt; B still differs only by the appended frozen memory. The runner now refuses to launch if the metadata is absent, empty, or contains paths outside `/workspace/`. This repairs the missing artifact-path handoff for future runs; it does not change or retroactively validate A or B, and it does not resolve the implementation's callable-contract failure found in the diagnostic replay.
 
 Raw trajectories, model requests, generated memory, corpus evidence, verifier logs, and implementation workspaces remain local. This report is the sanitized result record.
