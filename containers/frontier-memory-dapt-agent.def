@@ -1,0 +1,26 @@
+# Apptainer equivalent of /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/dapt-intrusion-detection-workflow-learning/environment/Dockerfile
+# (FROM ubuntu:24.04 pinned by digest; same apt/pip packages, WORKDIR /root,
+# and the two COPY steps. The agent-visible /root contents match the Dockerfile.)
+Bootstrap: docker
+From: ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/dapt-intrusion-detection-workflow-learning/environment/packets.pcap /root/packets.pcap
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/dapt-intrusion-detection-workflow-learning/environment/network_stats_template.csv /root/network_stats.csv
+
+%post
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv curl wget unzip git
+    rm -rf /var/lib/apt/lists/*
+    pip3 install --no-cache-dir --break-system-packages scapy==2.5.0 pandas==2.2.2 numpy==1.26.4
+    mkdir -p /logs/agent /logs/verifier
+    chmod 755 /root
+    chmod 644 /root/packets.pcap /root/network_stats.csv
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+
+%runscript
+    exec /bin/bash "$@"

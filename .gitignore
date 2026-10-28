@@ -40,3 +40,6 @@ __pycache__/
 # This exact config contains the corpus-derived memory text. Publish only a
 # placeholder template, never this generated artifact.
 /configs/mini-swe-ollama-7b-memory.yaml
+
+# Raw DAPT oracle/nop trial outputs (verifier logs, staged task copies).
+/results/frontiermemory-dapt/oracle-check-*/

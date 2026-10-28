@@ -1,0 +1,28 @@
+# v2 (adds pytest-json-ctrf for the --ctrf reporter used by the verifier; v1 lacked it)
+# Separate verifier image for dapt-intrusion-detection-workflow-learning.
+# Built from the agent image (same OS, scapy/pandas/numpy, /root inputs) plus
+# pytest and the pinned test files embedded at /tests (Harbor uses the verifier
+# image's own /tests when verifier.environment.docker_image is set).
+# Test files are copied from the official task directory without being read.
+Bootstrap: localimage
+From: /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/frontier-memory-dapt-agent.sif
+
+%setup
+    mkdir -p "${APPTAINER_ROOTFS}/tests"
+
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/dapt-intrusion-detection-workflow-learning/tests/test.sh /tests/test.sh
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/dapt-intrusion-detection-workflow-learning/tests/test_outputs.py /tests/test_outputs.py
+
+%post
+    set -eu
+    chmod 755 /tests /tests/test.sh
+    mkdir -p /logs/verifier /app
+    python3 -m pip install --no-cache-dir --break-system-packages pytest==8.4.1 pytest-json-ctrf==0.3.5
+    chmod 700 /logs/verifier
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+
+%runscript
+    exec /bin/bash "$@"

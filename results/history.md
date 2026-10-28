@@ -360,3 +360,12 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - A Codex run with v3 was not executed: Claude Code's permission check blocked sending corpus-derived memory to OpenAI.
 - Local A/B job 302098 (Qwen3.8 + OpenHands, same settings as 301916): A 0/3 strict (two missing callable, one NLTK import lookup error); B 3/3 strict, 6/6 cases each.
 - Sanitized report: `results/word2vec-openhands/ab-v3-results.md`.
+
+## 2026-10-28 — DAPT intrusion-detection oracle collection check (job 302130)
+
+- Staged the second official FrontierMemory task, `dapt-intrusion-detection-workflow-learning`, for Apptainer without modifying `data/tasks/`. Original task file hashes were checked before and after the run and are unchanged.
+- Built `containers/frontier-memory-dapt-agent.sif` (134 MB) from `containers/frontier-memory-dapt-agent.def`, which converts `environment/Dockerfile` (same pinned Ubuntu 24.04 digest, apt and pip pins, and `/root` COPY targets). Built `containers/frontier-memory-dapt-verifier-v2.sif` (about 138 MB) from `containers/frontier-memory-dapt-verifier-v2.def`, adding pytest 8.4.1 and pytest-json-ctrf 0.3.5 and embedding the pinned test files at `/tests`. The `tests/Dockerfile` was not read, so the verifier base is derived from the agent image rather than mirrored.
+- The first `batch` build failed on compute-node DNS for `auth.docker.io`, so the image was built on the login node. The first verifier image (v1) lacked the `--ctrf` pytest plugin, so job `302129` scored invalid rewards of 0 and was superseded by v2.
+- Declared artifact `/root/network_stats.csv`; working directory `/root`, so no workspace bind is needed. Agent timeout 5400 s, verifier timeout 600 s. Verifier network staged as `public` (no-network unsupported by Singularity; egress isolation not enforced).
+- Added `slurm/build-dapt-apptainer-images.sbatch`, `slurm/check-dapt-oracle-collection.sbatch`, and the `.def` files. Job `302130` passed the gate: oracle reward 1 with 37 of 37 cases passing; nop reward 0 with 37 failed.
+- Sanitized summary: `results/frontiermemory-dapt/oracle-check-summary.md`. Raw trials stay local and git-ignored under `results/frontiermemory-dapt/oracle-check-*/`.
