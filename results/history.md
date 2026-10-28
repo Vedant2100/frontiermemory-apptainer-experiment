@@ -339,3 +339,10 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - Strict reward: A 0/3, B 0/3. Verifier collected tests: A 0/3 (two missing required callable, one NLTK import lookup error), B 3/3 (1/6 cases passed each).
 - Trial 4 ran 771 s, confirming the Singularity exec-timeout wrapper removed the 600 s cap.
 - Sanitized report: `results/word2vec-openhands/ab-v2-results.md`.
+
+## 2026-10-28 — Codex CLI smoke trial, Word2Vec (job 302065)
+
+- Added a Codex CLI harness for the Word2Vec task, separate from the Ollama/OpenHands protocol: `scripts/run_codex_word2vec_trial.sh`, `scripts/word2vec_codex_trial.py`, and `slurm/run-word2vec-codex-trial.sbatch`. Each trial gets a fresh workspace and a private CODEX_HOME outside the repo. Codex runs inside the task agent container, and the unchanged verifier grades a copy of the workspace through Harbor's nop agent.
+- Smoke job `302065` (condition A, `gpt-reserve`, reasoning medium) completed with exit 0:0 in 1m36s. Codex finished in 41 s with one turn. `/workspace/solution.py` was produced, but the verifier collected 0 cases (a contract collection error). This is a valid FAIL, strict reward 0, and the Phase 3 smoke gate did not pass. There was no retry.
+- Not disabled: web search. The `web_search_mode` key was ignored by this Codex build, so the trial ran with Codex's default web-search setting. Recorded as a deviation.
+- Sanitized summary: `results/word2vec-openhands/codex-smoke-summary.md`. Raw outputs stay local and git-ignored under `results/word2vec-openhands/codex-v2/job-302065/`.
