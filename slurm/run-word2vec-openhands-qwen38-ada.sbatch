@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=fm-word2vec-openhands
-#SBATCH --partition=gpu
-#SBATCH --constraint=a6000ada
-#SBATCH --gres=gpu:1
+#SBATCH --partition=vcggpu
+#SBATCH --constraint=rtx3090
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=48G
+#SBATCH --mem=96G
 #SBATCH --time=00:40:00
 #SBATCH --output=logs/word2vec-openhands-%j.out
 #SBATCH --error=logs/word2vec-openhands-%j.err
@@ -14,7 +14,7 @@ export PATH="${PWD}/bin:${PATH}"
 export APPTAINER_CACHEDIR="${PWD}/containers/apptainer-cache"
 OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-65536}"
 REASONING_EFFORT="${REASONING_EFFORT:-medium}"
-EXPECTED_GPU="${EXPECTED_GPU:-NVIDIA RTX 6000 Ada Generation}"
+EXPECTED_GPU="${EXPECTED_GPU:-NVIDIA GeForce RTX 3090}"
 export OLLAMA_CONTEXT_LENGTH OLLAMA_KEEP_ALIVE=20m OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=/models OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1
 CONDITION="${CONDITION:-A}"
 if [[ "${CONDITION}" != A && "${CONDITION}" != B ]]; then echo "CONDITION must be A or B" >&2; exit 2; fi
@@ -25,8 +25,13 @@ LITELLM_EXTRA_BODY="$(.venv/bin/python -c 'import json,sys; print(json.dumps({"r
 MODEL_STORE="/home/csgrad/vbork001/shared-mem-gov-pilot/models"
 OLLAMA_SIF="${PWD}/containers/ollama.sif"
 AGENT_SIF="${PWD}/containers/frontier-memory-word2vec-agent.sif"
-VERIFIER_SIF="${PWD}/containers/frontier-memory-word2vec-verifier.sif"
+VERIFIER_SIF="${PWD}/containers/frontier-memory-word2vec-verifier-harbor-py310.sif"
+VERIFIER_BASE_SIF="${PWD}/containers/frontier-memory-word2vec-verifier.sif"
+VERIFIER_DEF="${PWD}/containers/frontier-memory-word2vec-verifier-harbor.def"
 SOURCE_TASK="${PWD}/data/tasks/frontier-memory/build-word2vec-pipeline"
+VENV_SOURCE="${PWD}/runtime/openhands-sdk-venv"
+PYTHON_SOURCE="${PWD}/runtime/uv/python/cpython-3.12-linux-x86_64-gnu"
+HARBOR_SHARED_BINDPATH="${PYTHON_SOURCE}:${PYTHON_SOURCE},${VENV_SOURCE}:/opt/harbor-server"
 TASK_PATH="${PWD}/build/word2vec-apptainer/${CONDITION}/job-${SLURM_JOB_ID}/build-word2vec-pipeline"
 RUN_DIR="${PWD}/results/word2vec-openhands/${CONDITION}/job-${SLURM_JOB_ID}"
 PROMPT_TEMPLATE="${RUN_DIR}/prompt-template.j2"
@@ -38,16 +43,36 @@ if [[ ! -s "${MODEL_MANIFEST}" ]]; then
   echo "Model ${MODEL} is not fully cached at ${MODEL_STORE}; refusing to start a GPU job or download weights." >&2
   exit 3
 fi
-test -s "${OLLAMA_SIF}" && test -s "${AGENT_SIF}" && test -s "${VERIFIER_SIF}" && test -d "${MODEL_STORE}"
-mkdir -p "${RUN_DIR}/ollama" logs
+test -s "${OLLAMA_SIF}" && test -s "${AGENT_SIF}" && test -s "${VERIFIER_BASE_SIF}" && test -s "${VERIFIER_DEF}" && test -d "${MODEL_STORE}"
+mkdir -p "${RUN_DIR}/ollama" "${RUN_DIR}/workspace" logs
+chmod 777 "${RUN_DIR}/workspace"
 date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
 scontrol show job "${SLURM_JOB_ID}" >"${RUN_DIR}/slurm-job.txt"
 nvidia-smi -q >"${RUN_DIR}/nvidia-smi.txt"
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv >"${RUN_DIR}/gpu.csv"
 grep -Fq "${EXPECTED_GPU}" "${RUN_DIR}/gpu.csv"
+printf 'CUDA_VISIBLE_DEVICES=%s\nSLURM_JOB_GPUS=%s\n' "${CUDA_VISIBLE_DEVICES:-unset}" "${SLURM_JOB_GPUS:-unset}" >"${RUN_DIR}/gpu-allocation.txt"
 .venv/bin/harbor --version >"${RUN_DIR}/harbor-version.txt"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
 apptainer exec --fakeroot "${OLLAMA_SIF}" ollama --version >"${RUN_DIR}/ollama-version.txt" 2>&1
+sha256sum "${SOURCE_TASK}/tests/test.sh" "${SOURCE_TASK}/tests/test_outputs.py" >"${RUN_DIR}/verifier-source-sha256.txt"
+if [[ ! -s "${VERIFIER_SIF}" ]]; then
+  apptainer build --fakeroot "${VERIFIER_SIF}" "${VERIFIER_DEF}" >"${RUN_DIR}/verifier-image-build.log" 2>&1
+fi
+test -s "${VERIFIER_SIF}"
+apptainer exec --fakeroot --pwd /tests "${VERIFIER_SIF}" /bin/bash -lc 'test -s /tests/test.sh && test -s /tests/test_outputs.py && /usr/bin/python3 -c "import sys,gensim,nltk,numpy,pytest,scipy; assert sys.version_info[:2] == (3,10), sys.version; print(\"verifier-python\",sys.version.split()[0])"' >"${RUN_DIR}/verifier-image-preflight.txt" 2>&1
+apptainer exec --fakeroot --pwd /tests "${VERIFIER_SIF}" sha256sum /tests/test.sh /tests/test_outputs.py >"${RUN_DIR}/verifier-image-tests-sha256.txt"
+.venv/bin/python - "${RUN_DIR}/verifier-source-sha256.txt" "${RUN_DIR}/verifier-image-tests-sha256.txt" <<'PY'
+import pathlib, sys
+source, image = (pathlib.Path(path) for path in sys.argv[1:])
+source_hashes = [line.split()[0] for line in source.read_text().splitlines()]
+image_hashes = [line.split()[0] for line in image.read_text().splitlines()]
+if source_hashes != image_hashes or len(source_hashes) != 2:
+    raise SystemExit("Verifier SIF test files differ from the pinned task source")
+PY
+printf '%s\n' "${HARBOR_SHARED_BINDPATH}" >"${RUN_DIR}/apptainer-shared-bindpath.txt"
+APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" apptainer exec --no-mount home,tmp,bind-paths --pwd /tests --writable-tmpfs --fakeroot --containall --pid "${VERIFIER_SIF}" /bin/bash -c '/usr/bin/python3 -c "import sys,gensim,nltk,numpy,pytest,scipy; assert sys.version_info[:2] == (3,10), sys.version; print(\"verifier-python\",sys.version.split()[0])" && /opt/harbor-server/bin/python3 -c "import fastapi,uvicorn; print(\"harbor-server-runtime\",fastapi.__version__,uvicorn.__version__)"' >"${RUN_DIR}/verifier-runtime-preflight.txt" 2>&1
+sha256sum "${VERIFIER_SIF}" >"${RUN_DIR}/verifier-image-sha256.txt"
 .venv/bin/python scripts/stage_word2vec_task_for_apptainer.py --source "${SOURCE_TASK}" --output "${TASK_PATH}" --agent-image "${AGENT_SIF}" --verifier-image "${VERIFIER_SIF}" >"${RUN_DIR}/task-staging.json"
 .venv/bin/python - "${TASK_PATH}/task.toml" "${RUN_DIR}/task-staging.json" "${RUN_DIR}/staged-task-preflight.json" <<'PY'
 import json, pathlib, sys, tomllib
@@ -64,6 +89,7 @@ summary = {
     "declared_artifacts": task.get("artifacts", []),
     "verifier_network_mode": verifier["network_mode"],
     "network_egress_isolation_enforced": False,
+    "verifier_tests_embedded_in_separate_verifier_image": True,
     "preflight": "passed",
 }
 output_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -75,19 +101,14 @@ printf '%s\n' "${MODEL}" >"${RUN_DIR}/model.txt"
 printf '%s\n' "${OLLAMA_CONTEXT_LENGTH}" >"${RUN_DIR}/requested-context.txt"
 printf '%s\n' "${REASONING_EFFORT}" >"${RUN_DIR}/reasoning-effort.txt"
 printf '%s\n' "${LITELLM_EXTRA_BODY}" >"${RUN_DIR}/litellm-extra-body.json"
-VENV_SOURCE="${PWD}/runtime/openhands-sdk-venv"
-PYTHON_SOURCE="${PWD}/runtime/uv/python/cpython-3.12-linux-x86_64-gnu"
 test -x "${VENV_SOURCE}/bin/python" && test -x "${PYTHON_SOURCE}/bin/python3.12"
-# Harbor's Singularity bootstrap insists on /usr/bin/python3 and creates its
-# own /opt/harbor-server venv. Reuse the already-installed OpenHands venv and
-# standalone Python through binds, so neither package installation nor image
-# rebuild is needed inside the task container.
-# The singularity wrapper already binds the OpenHands venv at
-# /opt/openhands-sdk-venv. Do not add it twice; Harbor also needs the same
-# existing venv at /opt/harbor-server for its offline bootstrap.
-MOUNTS_JSON="$(.venv/bin/python -c 'import json,sys; v,p=sys.argv[1:]; print(json.dumps([{"type":"bind","source":p,"target":p},{"type":"bind","source":v,"target":"/opt/harbor-server"},{"type":"bind","source":p+"/bin/python3.12","target":"/usr/bin/python3"}]))' "${VENV_SOURCE}" "${PYTHON_SOURCE}")"
+# Harbor's per-run mounts reach the agent but not a separate verifier. Pass the
+# already installed Python and Harbor venv through APPTAINER_BINDPATH so both
+# containers can start offline, without duplicating or rebuilding the venv.
+MOUNTS_JSON="$(.venv/bin/python -c 'import json,sys; p,w=sys.argv[1:]; print(json.dumps([{"type":"bind","source":p+"/bin/python3.12","target":"/usr/bin/python3"},{"type":"bind","source":w,"target":"/workspace"}]))' "${PYTHON_SOURCE}" "${RUN_DIR}/workspace")"
 printf '%s\n' "${MOUNTS_JSON}" >"${RUN_DIR}/environment-mounts.json"
-apptainer exec --fakeroot --writable-tmpfs --containall --no-mount home,tmp,bind-paths --bind "${VENV_SOURCE}:/opt/openhands-sdk-venv" --bind "${VENV_SOURCE}:/opt/harbor-server" --bind "${PYTHON_SOURCE}:${PYTHON_SOURCE}" --bind "${PYTHON_SOURCE}/bin/python3.12:/usr/bin/python3" "${AGENT_SIF}" /bin/bash -c '/usr/bin/python3 --version && /opt/harbor-server/bin/python3 -c "import fastapi,uvicorn; print(\"harbor-server-runtime\",fastapi.__version__,uvicorn.__version__)" && /opt/openhands-sdk-venv/bin/python -c "import openhands.sdk, openhands.tools; print(\"openhands-sdk\", openhands.sdk.__version__)"' >"${RUN_DIR}/openhands-runtime-preflight.txt" 2>&1
+printf '%s\n' "${RUN_DIR}/workspace" >"${RUN_DIR}/persistent-workspace-path.txt"
+APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" apptainer exec --fakeroot --writable-tmpfs --containall --no-mount home,tmp,bind-paths --bind "${PYTHON_SOURCE}/bin/python3.12:/usr/bin/python3" --bind "${VENV_SOURCE}:/opt/openhands-sdk-venv" --pwd /workspace "${AGENT_SIF}" /bin/bash -c '/usr/bin/python3 --version && /opt/harbor-server/bin/python3 -c "import fastapi,uvicorn; print(\"harbor-server-runtime\",fastapi.__version__,uvicorn.__version__)" && /opt/openhands-sdk-venv/bin/python -c "import openhands.sdk, openhands.tools; print(\"openhands-sdk\", openhands.sdk.__version__)"' >"${RUN_DIR}/openhands-runtime-preflight.txt" 2>&1
 COMMON_ARGS=(--path "${TASK_PATH}" --env singularity --mounts-json "${MOUNTS_JSON}" --jobs-dir jobs --job-name "${HARBOR_JOB_NAME}" --agent openhands-sdk --model "${MODEL_API_NAME}" --agent-kwarg "prompt_template_path=${PROMPT_TEMPLATE}" --agent-kwarg "reasoning_effort=${REASONING_EFFORT}" --agent-kwarg temperature=0.1 --agent-kwarg load_skills=false --agent-kwarg max_iterations=30 --agent-kwarg python_version=3.12 --agent-env LLM_API_KEY=local-ollama-no-auth --agent-env LLM_BASE_URL=http://127.0.0.1:11434/v1 --agent-env "LITELLM_EXTRA_BODY=${LITELLM_EXTRA_BODY}" --n-attempts 1 --n-concurrent 1 --agent-timeout-multiplier 1.0 --agent-setup-timeout-multiplier 0.5 --yes)
 .venv/bin/harbor run "${COMMON_ARGS[@]}" --print-config >"${RUN_DIR}/harbor-resolved-config.json" 2>"${RUN_DIR}/harbor-config.log"
 mkdir -p "${RUN_DIR}/ollama/tmp"
@@ -119,8 +140,9 @@ print(json.dumps({"native_thinking_field_nonempty": True, "native_thinking_chars
 PY
 curl --fail --silent http://127.0.0.1:11434/api/ps >"${RUN_DIR}/ollama/loaded-model-before-agent.json"
 .venv/bin/python -c 'import json,sys; m=json.load(open(sys.argv[1],encoding="utf-8"))["models"][0]; print("name",m.get("name")); print("context_length",m.get("context_length")); print("size_vram",m.get("size_vram")); sys.exit(0 if m.get("context_length")==int(sys.argv[2]) else 1)' "${RUN_DIR}/ollama/loaded-model-before-agent.json" "${OLLAMA_CONTEXT_LENGTH}" >"${RUN_DIR}/ollama/loaded-model-summary.txt"
+nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv >"${RUN_DIR}/gpu-after-model-load.csv"
 set +e
-timeout --signal=INT --kill-after=20s 1200s .venv/bin/harbor run "${COMMON_ARGS[@]}" >"${RUN_DIR}/harbor.log" 2>&1
+APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" timeout --signal=INT --kill-after=20s 1200s .venv/bin/harbor run "${COMMON_ARGS[@]}" >"${RUN_DIR}/harbor.log" 2>&1
 HARBOR_EXIT=$?
 set -e
 printf '%s\n' "${HARBOR_EXIT}" >"${RUN_DIR}/harbor-exit-code.txt"
