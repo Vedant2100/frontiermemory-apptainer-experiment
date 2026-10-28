@@ -2,6 +2,8 @@
 
 Date: 2026-10-28. Exploratory; n=3 per arm, one task, one local model. No leaderboard claim.
 
+> **Compliance note (added 2026-10-28).** Treat this result as a non-compliant upper bound, not a FrontierMemory-protocol result. The official memory-generation instruction (`frontiermemory/src/frontier_memory/dream_task/instruction.md`) forbids copying final answers, submitted artifacts, or commands that reproduce a prior final artifact. Memory v3's "reference recipe" reconstructs what prior PASS runs delivered. Its evidence was also selected by target-task keywords, which the protocol does not allow. Memory v4 is the follow-up: it uses the official instruction verbatim.
+
 ## Setup
 
 Identical to job 301916 (`results/word2vec-openhands/ab-v2-results.md`) except the memory file.
