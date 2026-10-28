@@ -353,3 +353,10 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - Strict reward: A 0/3, B 0/3. Verifier collected tests: A 0/3 (contract collection errors), B 3/3 (1/6 cases passed each). Same pattern as the OpenHands/Qwen A/B (job 301916).
 - No web or MCP events observed. No timeouts. Auth not refreshed.
 - Sanitized report: `results/word2vec-openhands/codex-ab-results.md`. Slurm time limit for the runner raised from 1 h to 3 h.
+
+## 2026-10-28 — Memory v3 and local A/B (jobs 302091, 302098)
+
+- Memory v3 was generated locally (Qwen3.8, job 302091) from the same 14 word2vec-family trajectories without per-step truncation. It has a cited PASS-run reference recipe; 3,518 bytes, 39 citations all resolved; frozen sha `fe61fdff…`.
+- A Codex run with v3 was not executed: Claude Code's permission check blocked sending corpus-derived memory to OpenAI.
+- Local A/B job 302098 (Qwen3.8 + OpenHands, same settings as 301916): A 0/3 strict (two missing callable, one NLTK import lookup error); B 3/3 strict, 6/6 cases each.
+- Sanitized report: `results/word2vec-openhands/ab-v3-results.md`.
