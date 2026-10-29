@@ -47,3 +47,5 @@ __pycache__/
 # Raw DAPT oracle/nop trial outputs (verifier logs, staged task copies).
 /results/frontiermemory-dapt/oracle-check-*/
 scripts/.runner-snapshot-*.sh
+results/governor-run-*/
+results/cookie-store-oracle-check-*/

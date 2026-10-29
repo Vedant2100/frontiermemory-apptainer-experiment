@@ -89,4 +89,21 @@ This audit does not feed back into any arm.
 - **Memory map notes:** reused across R25, M3, G and GR, which is equivalent to rerunning the per-trajectory map.
 
 ## Amendments
-(none)
+
+### A1 (2026-10-29): governor judge. Made before any trial of G or GR, using only synthetic validation data
+
+**Why.** The first validation (job 303211, gemma3:27b, judge prompt sha `59e83a40…`) gave sensitivity 0.12 and specificity 0.92, so the gate failed.
+- In 59 of the 100 perturbed units, the changed token does not appear in the unit's evidence. No judge could detect those perturbations, so the validation design itself was flawed.
+- Judging all 11,299 units would take about 19 h.
+
+**Changes:**
+1. **Validation set.** 100 units sampled with seed 2027 from M3 units that carry resolvable citations *and* whose perturbed token occurs in the unit's evidence. These are detectable perturbations. The specificity set is the same 100 units, unperturbed. The gate is unchanged: sensitivity ≥ 0.6, specificity ≥ 0.8.
+2. **The one allowed prompt revision.** The judge must first quote the evidence span about the same entity, then compare specific values, identifiers and directives. It answers `contradicted` when the evidence states a different value, identifier or directive for the same thing.
+3. **Judge model chosen by validation.** Both `gemma3:27b` (non-Qwen) and `qwen3.8:27b-mtp-q4_K_M` are validated with the revised prompt.
+   - Use the one that passes the gate with the higher sensitivity; on a tie, the non-Qwen model. Same-family correlation is declared if Qwen is chosen.
+   - If neither passes, arms G and GR are dropped from the confirmatory matrix. The judge failure is then reported as a finding.
+4. **Judging scope.** Only *technical* units are judged: those containing a digit, a backticked span or a command-like token, using the rules.py predicate. Non-technical units are always kept.
+   - Primary rule: drop technical units judged `contradicted`, plus the R-artifact units.
+   - Separation rule (if under 5% of non-heading units are removed): also drop technical units judged `insufficient`.
+   - GR samples from the same non-heading population as before.
+5. Governor outputs are written under the git-ignored `results/governor-run-*/`.
