@@ -160,3 +160,17 @@ The validation results for the A1 judges and the A2 rule are reported as finding
 - Tag a trial as "memory consulted" when the trace shows the agent opening memory files, and record which topic files it opened.
 - Classify each opened file as same-family or other-family. The classification uses only the topic file name and the task's *name*: a deterministic token overlap of at least 1 shared content word. It never uses task content.
 - Report how often harmful trials involve other-family topics. This is descriptive only.
+
+## Freeze (2026-10-29)
+
+These are frozen before any confirmatory trial.
+
+| Item | Value |
+|---|---|
+| Arms | A0 (no memory); R25 `memory/frozen-r25`, digest `75be173fb8b1332429bac0fc23323e9e62cd9fbf36c3e9740840d217461cf4c6`; M3 `memory/frozen-v5-fullindex`, digest `4a2eb5286366d650260af0b873a91be9f99b2891a327f0ae73ba8c2e8ef0517a` |
+| Tasks (all 7 validated against the oracle) | build-word2vec-pipeline, dapt-intrusion-detection-workflow-learning, cattrs-compositional-changelog, cookie-store-compositional-changelog, awilix-release-tier-implicit, awilix-release-tier-explicit, customer-delivery-contextual-preferences |
+| Trial order per task job | `A0 R25 M3 R25 M3 A0 M3 A0 R25 A0 R25 M3 R25 M3 A0` (5 rounds, each arm 5 times) |
+| Runner | commit of tag `prereg-v1`; per-job snapshot |
+| Calendar | No fixed dates (user, 2026-10-29). Each task's job starts once its GPU smoke trial has run cleanly. Smoke and earlier exploratory trials are not pooled |
+
+Infrastructure reruns follow §3. If a task job is lost to infrastructure, the whole task job is rerun with the same order, and the loss is reported.
