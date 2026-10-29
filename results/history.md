@@ -380,3 +380,4 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - A/B 302175 (same OpenHands harness): A 0/3 strict (0/3 collected); B 1/3 strict, 3/3 collected, cases 2/5/6 of 6.
 - Ladder so far: v2 0/3 (1.0 cases) < v4 1/3 (4.3) < v3 6/6 (non-compliant). No-memory arms 0/12 overall.
 - Report: `results/word2vec-openhands/ab-v4-results.md`.
+- 2026-10-28: memory v5 (whole corpus, official instruction) frozen; digest 94d59c2c…; official check ok; index lists 106/324 topics (truncated). Main A/B submitted: Word2Vec 303008, DAPT 303009. See results/memory-v5-summary.md.

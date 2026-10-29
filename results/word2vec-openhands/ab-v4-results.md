@@ -18,7 +18,7 @@ Memory v4 (job 302127, frozen sha `b2566a31…`, 4,137 bytes):
 
 Lead audit of v4 (against the task instruction only):
 - It misreads one PASS run (t0661) as FAIL.
-- It states that the delivered `task_func(texts, stopwords=None)` interface is a failure mode to avoid. PASS runs actually delivered that interface.
+- It warns against using the delivered entry-point interface, calling it a failure mode. PASS runs actually delivered that interface.
 - It keeps correct preprocessing, `min_count=1`, and environment facts.
 - 6 of 22 bullets cite evidence. Citations are informational; the official format does not require them.
 
@@ -38,7 +38,7 @@ All trials are valid, with no Harbor exception.
 ## Reading
 
 - A: 0/3 strict, 0/3 collected. B: 1/3 strict, 3/3 collected, mean 4.3/6 cases.
-- Despite advising against `task_func`, the memory names its exact signature. All three B artifacts met the callable contract.
+- Despite advising against the delivered entry point, the memory names its exact signature. All three B artifacts met the callable contract.
 - The wrong advice did not prevent use of the right interface. It is a qualitative warning about weak memory models under the official rules.
 
 ## Memory ablation ladder on Word2Vec (same harness and settings)
