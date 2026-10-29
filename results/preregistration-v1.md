@@ -107,3 +107,31 @@ This audit does not feed back into any arm.
    - Separation rule (if under 5% of non-heading units are removed): also drop technical units judged `insufficient`.
    - GR samples from the same non-heading population as before.
 5. Governor outputs are written under the git-ignored `results/governor-run-*/`.
+
+### A2 (2026-10-29): deterministic grounding governor. Made after the A1 judge failure, before any G or GR trial; no task outcomes seen
+
+**Why.** Under A1, neither local judge passed the gate on detectable perturbations:
+
+| Model | Job | Sensitivity | Specificity |
+|---|---|---|---|
+| gemma3:27b | 303219 | 0.16 | 0.85 |
+| qwen3.8:27b | 303220 | 0.21 | 0.98 |
+
+Per A1, the LLM-judge governor is **dropped**, and its failure is reported as a finding: local 27B judges cannot verify the claims in memory lessons against trajectory evidence.
+
+A1 prescribed dropping G and GR. **This amendment replaces that outcome with a different, model-free governor.** It is declared as a second design choice made after a construction-time failure. Results for G under A2 are reported together with this history.
+
+**G (A2) rule.** The pipeline is unchanged except for steps 4–5.
+1. **Concrete tokens.** For each *technical* unit (rules.py predicate), extract:
+   - backticked spans, compared case-sensitively;
+   - standalone numbers, excluding citation markup and step indices.
+2. **Grounded.** A unit is grounded if every extracted token occurs in its evidence. The evidence is the cited steps when citations resolve, otherwise the top-3 BM25 steps within the topic group, as in §2. Backticked spans are matched as substrings; numbers are matched as numeric tokens.
+3. **Admission.** Drop ungrounded technical units and R-artifact units. Keep non-technical units. No separation rule applies.
+
+**Validation, same sets as A1:**
+- Sensitivity is the share of perturbed units dropped.
+- Specificity is the share of original units kept.
+- The gate is unchanged: sensitivity ≥ 0.6 and specificity ≥ 0.8.
+- There are no revisions. If the gate fails, G and GR are dropped for good.
+
+**GR:** the same number of units removed uniformly at random (seed 2027) from all non-heading units, as before.
