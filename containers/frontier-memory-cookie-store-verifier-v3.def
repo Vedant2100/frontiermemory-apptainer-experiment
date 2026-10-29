@@ -1,0 +1,32 @@
+Bootstrap: localimage
+From: /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/frontier-memory-cookie-store.sif
+
+# Restore the repository's original test tree and Git tree at task base commit
+# b5addb64f0161ff6bfe94c124ef76f6a1fba5254. The task image omits these files.
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/runtime/httpx-cookie-store-source/.git /app/.git
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/runtime/httpx-cookie-store-source/tests /app/tests
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/cookie-store-compositional-changelog/tests /tests
+
+%post
+    set -eu
+    test "$(git -C /app rev-parse HEAD)" = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+    # %files copies into directories the base image already has, which nests the copies as /app/tests/tests and
+    # /app/.git/.git. Remove the nested duplicates (identical content) so pytest and git see one repository and one
+    # test tree, as in the official image.
+    rm -rf /app/tests/tests /app/.git/.git
+    test -z "$(git -C /app status --porcelain)"
+    git -C /app cat-file -e HEAD:tests/conftest.py
+    test -f /app/tests/conftest.py
+    test -f /tests/test.sh
+    chmod +x /tests/test.sh
+    # Cluster workaround (no subuid range for the account): Apptainer --fakeroot falls back to a root-mapped
+    # namespace where only uid 0 exists, so files created after `runuser -u agent` (uid 10001) appear owned by uid 0
+    # and pytest's tmp_path ownership check fails for every patch, the reference included. Alias `agent` to uid/gid 0
+    # so the verifier's user switch is consistent with what the namespace can represent. Tests are unchanged.
+    sed -i '/^agent:/d' /etc/passwd /etc/group
+    printf '%s\n' 'agent:x:0:0:Harbor agent (aliased to uid 0, see def):/home/agent:/bin/sh' >> /etc/passwd
+    printf '%s\n' 'agent:x:0:' >> /etc/group
+    mkdir -p /home/agent
+    mkdir -p /logs/verifier
+    chmod 700 /logs/verifier

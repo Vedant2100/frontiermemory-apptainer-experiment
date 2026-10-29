@@ -26,9 +26,18 @@
 #
 # Env:
 #   TASK            build-word2vec-pipeline (default) or dapt-intrusion-detection-workflow-learning.
-#   TRIAL_ORDER     space-separated A/B tokens (default: A). Condition A has no memory.
-#   FROZEN_MEMORY_DIR      memory folder for condition B (required when TRIAL_ORDER has a B).
-#   EXPECTED_MEMORY_DIGEST official folder digest the memory must match (required with B).
+#   TRIAL_ORDER     space-separated arm tokens (default: A). A0 or A = no memory (condition A).
+#                   B = legacy single memory arm: FROZEN_MEMORY_DIR + EXPECTED_MEMORY_DIGEST (condition B).
+#                   Any other token must be a NAME from MEMORY_ARMS (condition B).
+#   MEMORY_ARMS     several memory arms, "NAME=/abs/dir@digest;NAME2=/abs/dir2@digest2". NAME matches
+#                   ^[A-Z][A-Z0-9]*$; A, A0 and B are reserved. Every arm's digest is verified at job start
+#                   (fail fast), and again per trial. Trial dirs are trial-<i>-<ARM>.
+#   FROZEN_MEMORY_DIR      memory folder for legacy arm B (required when TRIAL_ORDER has a B).
+#   EXPECTED_MEMORY_DIGEST official folder digest the legacy B memory must match (required with B).
+#   --dry-run-arms  (argument) validate MEMORY_ARMS and TRIAL_ORDER, verify digests, print the plan, and exit
+#                   before any GPU, Ollama, or Harbor work. Writes nothing under results/.
+#   Balanced order (preregistered, 3 rounds of a Latin rotation): see
+#     python3 scripts/codex_ollama_trial_helper.py balanced-order --arms A0,R25,M3,G,GR
 #   OLLAMA_PORT     port for the job's Ollama server (default: a free port picked at start).
 #   PROBE_TIMEOUT_SEC  provider probe timeout (default 600).
 #   GRADE_GUARD     outer hang guard for each grading Harbor call (default 2700s, as in the DAPT oracle check).
@@ -88,29 +97,85 @@ IS_DAPT=0
 # Image directory that a per-trial working directory is copied from (same as WORKDIR_IN for file tasks).
 IMAGE_WORKDIR="${WORKDIR_IN}"
 
+DRY_RUN_ARMS=0
+if [[ "${1:-}" == --dry-run-arms ]]; then DRY_RUN_ARMS=1; shift; fi
+if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
+
+# ------------------------------------------------------------- memory arms and trial order
+# Each TRIAL_ORDER token is an arm name. Arm A0 (or the legacy A) has no memory and condition A. Every other arm
+# has memory and condition B. Arms come from MEMORY_ARMS, plus the legacy B from FROZEN_MEMORY_DIR.
 TRIAL_ORDER="${TRIAL_ORDER:-A}"
+MEMORY_ARMS="${MEMORY_ARMS:-}"
+FROZEN_MEMORY_DIR="${FROZEN_MEMORY_DIR:-}"
+EXPECTED_MEMORY_DIGEST="${EXPECTED_MEMORY_DIGEST:-}"
+ARM_HELPER="${REPO}/scripts/codex_ollama_trial_helper.py"
+declare -A ARM_DIR=() ARM_DIGEST=()
+ARM_NAMES=()        # every memory arm defined for this job, in definition order (legacy B first)
 read -r -a TRIAL_TOKENS <<<"${TRIAL_ORDER}"
 if [[ "${#TRIAL_TOKENS[@]}" -lt 1 ]]; then echo "TRIAL_ORDER is empty" >&2; exit 2; fi
-HAS_B=0
+
+for token in "${TRIAL_TOKENS[@]}"; do
+  if [[ "${token}" == B ]]; then
+    # Legacy single memory arm: FROZEN_MEMORY_DIR and EXPECTED_MEMORY_DIGEST, as before.
+    if [[ -z "${FROZEN_MEMORY_DIR}" || -z "${EXPECTED_MEMORY_DIGEST}" ]]; then
+      echo "TRIAL_ORDER has B: set FROZEN_MEMORY_DIR and EXPECTED_MEMORY_DIGEST." >&2; exit 4
+    fi
+    test -d "${FROZEN_MEMORY_DIR}"
+    if [[ -z "${ARM_DIR[B]:-}" ]]; then
+      ARM_NAMES+=(B); ARM_DIR[B]="${FROZEN_MEMORY_DIR}"; ARM_DIGEST[B]="${EXPECTED_MEMORY_DIGEST}"
+    fi
+  fi
+done
+
+if [[ -n "${MEMORY_ARMS}" ]]; then
+  IFS=';' read -r -a ARM_SPECS <<<"${MEMORY_ARMS}"
+  for spec in "${ARM_SPECS[@]}"; do
+    spec="${spec#"${spec%%[![:space:]]*}"}"; spec="${spec%"${spec##*[![:space:]]}"}"
+    [[ -z "${spec}" ]] && continue
+    if [[ "${spec}" != *=*@* ]]; then echo "MEMORY_ARMS entry must be NAME=/abs/dir@digest (name ${spec%%=*})" >&2; exit 4; fi
+    name="${spec%%=*}"; rest="${spec#*=}"; dir="${rest%@*}"; digest="${rest##*@}"
+    if [[ ! "${name}" =~ ^[A-Z][A-Z0-9]*$ ]]; then echo "arm name must match ^[A-Z][A-Z0-9]*\$: ${name}" >&2; exit 4; fi
+    case "${name}" in A|A0|B) echo "arm name ${name} is reserved" >&2; exit 4 ;; esac
+    if [[ -n "${ARM_DIR[${name}]:-}" ]]; then echo "duplicate MEMORY_ARMS name: ${name}" >&2; exit 4; fi
+    if [[ "${dir}" != /* ]]; then echo "arm ${name}: folder must be an absolute path" >&2; exit 4; fi
+    if [[ ! "${digest}" =~ ^[0-9a-f]{64}$ ]]; then echo "arm ${name}: digest must be 64 lowercase hex characters" >&2; exit 4; fi
+    ARM_NAMES+=("${name}"); ARM_DIR[${name}]="${dir}"; ARM_DIGEST[${name}]="${digest}"
+  done
+fi
+
 for token in "${TRIAL_TOKENS[@]}"; do
   case "${token}" in
-    A) ;;
-    B) HAS_B=1 ;;
-    *) echo "TRIAL_ORDER token must be A or B: ${token}" >&2; exit 2 ;;
+    A|A0) ;;
+    B) ;;
+    *) if [[ -z "${ARM_DIR[${token}]:-}" ]]; then
+         echo "TRIAL_ORDER token must be A0, A, B, or a MEMORY_ARMS name: ${token}" >&2; exit 2
+       fi ;;
   esac
 done
 
+# Fail fast: every defined memory arm must match its digest before any trial or GPU work starts.
+ARM_VERIFY_LINES=()
+for arm in ${ARM_NAMES[@]+"${ARM_NAMES[@]}"}; do
+  line="$("${PY}" "${ARM_HELPER}" verify-memory --name "${arm}" --memory-dir "${ARM_DIR[${arm}]}" \
+    --expected-digest "${ARM_DIGEST[${arm}]}")" || { echo "arm ${arm}: memory verification failed; no trial started." >&2; exit 4; }
+  ARM_VERIFY_LINES+=("${line}")
+done
+
+if [[ "${DRY_RUN_ARMS}" == 1 ]]; then
+  echo "dry run (no GPU, Ollama, or Harbor work):"
+  for line in ${ARM_VERIFY_LINES[@]+"${ARM_VERIFY_LINES[@]}"}; do echo "  arm ${line}"; done
+  index=0
+  for token in "${TRIAL_TOKENS[@]}"; do
+    index=$((index + 1))
+    cond=B; [[ "${token}" == A || "${token}" == A0 ]] && cond=A
+    echo "  trial ${index}: arm=${token} condition=${cond} dir=trial-${index}-${token}"
+  done
+  echo "  total trials: ${#TRIAL_TOKENS[@]}"
+  exit 0
+fi
+
 PROBE_TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-600}"
 GRADE_GUARD="${GRADE_GUARD:-2700s}"
-
-FROZEN_MEMORY_DIR="${FROZEN_MEMORY_DIR:-}"
-EXPECTED_MEMORY_DIGEST="${EXPECTED_MEMORY_DIGEST:-}"
-if [[ "${HAS_B}" == 1 ]]; then
-  if [[ -z "${FROZEN_MEMORY_DIR}" || -z "${EXPECTED_MEMORY_DIGEST}" ]]; then
-    echo "TRIAL_ORDER has B: set FROZEN_MEMORY_DIR and EXPECTED_MEMORY_DIGEST." >&2; exit 4
-  fi
-  test -d "${FROZEN_MEMORY_DIR}"
-fi
 
 # Shared word2vec base prompt template (same bytes as the word2vec Codex runner). Used for word2vec only;
 # the DAPT prompt gets the same header built from the staged task metadata.
@@ -164,6 +229,7 @@ mkdir -p "${RUN_DIR}/preflight" "${RUN_DIR}/ollama/tmp" "${META_DIR}" "${BUILD_R
 date --iso-8601=seconds >"${RUN_DIR}/started-at.txt"
 printf '%s\n' "${TASK}" >"${RUN_DIR}/task.txt"
 printf '%s\n' "${TRIAL_ORDER}" >"${RUN_DIR}/trial-order.txt"
+if [[ ${#ARM_VERIFY_LINES[@]} -gt 0 ]]; then printf '%s\n' "${ARM_VERIFY_LINES[@]}" >"${RUN_DIR}/memory-arms.jsonl"; fi
 sha256sum "${INSTRUCTION}" >"${RUN_DIR}/instruction-sha256.txt"
 sha256sum "${HARBOR_WRAPPER}" "${CODEX_HELPER}" "${NEW_HELPER}" "${TASK_HELPER}" "${BASH_SOURCE[0]}" >"${RUN_DIR}/harness-sha256.txt"
 if [[ "${IS_W2V}" == 1 ]]; then printf '%s\n' "${TEMPLATE_SHA}  ${PROMPT_TEMPLATE_SRC}" >"${RUN_DIR}/prompt-template-sha256.txt"; fi
@@ -452,15 +518,16 @@ run_patch_collect() {  # $1 = agent workspace (bound at WORKDIR_IN), $2 = trial 
 
 # ---------------------------------------------------------------- one trial
 run_trial() {
-  local index="$1" condition="$2"
-  local tag="trial-${index}-${condition}"
+  local index="$1" arm="$2" condition
+  case "${arm}" in A|A0) condition=A ;; *) condition=B ;; esac
+  local tag="trial-${index}-${arm}"
   local tdir="${RUN_DIR}/${tag}"
   local ws="${tdir}/${WORKDIR_IN#/}"          # host directory bound at WORKDIR_IN (workspace or root)
   local prompt="${tdir}/prompt.txt"
   local gdir="${tdir}/grading"
   local gws="${gdir}/workspace"
   local gtask="${BUILD_ROOT}/${tag}/grade/${TASK}"
-  local job_name="frontiermemory-codex-ollama-${TASK:0:24}-job${JOB_ID}-t${index}-${condition}"
+  local job_name="frontiermemory-codex-ollama-${TASK:0:24}-job${JOB_ID}-t${index}-${arm}"
   local grade_job="${job_name}-grade"
   local mounts_json prompt_sha config_sha memory_sha="" codex_rc grade_rc timed_out="false" t0 t1 gin_start
   local mode="none" start_sha="" artifact_final="${ws}/${ARTIFACT_REL}"
@@ -501,8 +568,8 @@ run_trial() {
   write_config "${CURRENT_CH}" "${VARIANT}"
   config_sha="$(sha256sum "${CURRENT_CH}/config.toml" | awk '{print $1}')"
   if [[ "${condition}" == B ]]; then
-    "${PY}" "${NEW_HELPER}" seed-memory --memory-dir "${FROZEN_MEMORY_DIR}" --codex-home "${CURRENT_CH}" \
-      --expected-digest "${EXPECTED_MEMORY_DIGEST}" --output "${tdir}/memory-seed.json"
+    "${PY}" "${NEW_HELPER}" seed-memory --memory-dir "${ARM_DIR[${arm}]}" --codex-home "${CURRENT_CH}" \
+      --expected-digest "${ARM_DIGEST[${arm}]}" --output "${tdir}/memory-seed.json"
     memory_sha="$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["memory_sha256"])' "${tdir}/memory-seed.json")"
   fi
 
@@ -584,14 +651,14 @@ run_trial() {
 
   # 5. Sanitized record (counts and status only), then the provider and Ollama audit fields.
   "${PY}" "${TASK_HELPER}" trial-record --task "${TASK}" --trial-dir "${tdir}" --grade-dir "${gdir}" \
-    --job-dir "jobs/${grade_job}" --job-id "${JOB_ID}" --index "${index}" --condition "${condition}" \
+    --job-dir "jobs/${grade_job}" --job-id "${JOB_ID}" --index "${index}" --condition "${condition}" --arm "${arm}" \
     --model "${MODEL}" --reasoning "${REASONING}" --harbor-exit "${grade_rc}" --agent-timeout-sec "${TRIAL_TIMEOUT_SEC}" \
     --artifact-file "${artifact_final}" --artifact-start-sha "${start_sha}" \
     --provider-variant "${VARIANT}" --base-url-host "${OLLAMA_HOST_PORT}" --memory-mode "${mode}" \
     --audit "${tdir}/ollama-audit.json" --ps-before "${tdir}/ollama-ps-before.json" --ps-after "${tdir}/ollama-ps-after.json" \
     --output "${tdir}/trial-record.json"
   date --iso-8601=seconds >"${tdir}/finished-at.txt"
-  echo "trial ${index} condition=${condition} codex_exit=${codex_rc} timed_out=${timed_out} grade_exit=${grade_rc}"
+  echo "trial ${index} arm=${arm} condition=${condition} codex_exit=${codex_rc} timed_out=${timed_out} grade_exit=${grade_rc}"
 }
 
 INDEX=0
@@ -601,5 +668,5 @@ for token in "${TRIAL_TOKENS[@]}"; do
 done
 
 ps_snapshot "${RUN_DIR}/ollama/ps-after-trials.json"
-"${PY}" "${CODEX_HELPER}" aggregate --run-dir "${RUN_DIR}" --job-id "${JOB_ID}" --trial-order "${TRIAL_ORDER}"
+"${PY}" "${TASK_HELPER}" aggregate --run-dir "${RUN_DIR}" --job-id "${JOB_ID}" --trial-order "${TRIAL_ORDER}"
 date --iso-8601=seconds >"${RUN_DIR}/run-body-finished-at.txt"

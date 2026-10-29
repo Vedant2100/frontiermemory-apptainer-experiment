@@ -49,3 +49,17 @@ The remaining error has the same cause as before: pytest raises `tmp_path root .
 This is an environment fault that affects every arm and the official solution equally. It cannot be fixed without changing the verifier or the cluster's user-namespace configuration.
 
 **Status: cookie-store is NOT validated.** Under preregistration §3 it stays excluded unless the grading path is fixed by Nov 5. The proper fix is a subuid/subgid range for the account, granted by the cluster admin.
+
+## Workaround validated (job 303229, 2026-10-29)
+
+Verifier image v3 (`containers/frontier-memory-cookie-store-verifier-v3.def`) aliases the `agent` user to uid/gid 0. Test files and `test.sh` are unchanged.
+
+| Run | Patch bytes | Functional | Regression | Preference gates | Functional reward | Strict reward |
+|---|---|---|---|---|---|---|
+| nop | 0 | n/a (the verifier exits early) | n/a | n/a | 0 | 0 |
+| oracle | 23,099 | 115/115 | 1285 passed, 0 failed, 0 errors, 4 skipped | 2 pass, 2 fail | 1 | 0 |
+| scratch-nop (our collection) | 23,099 (same hash) | identical to oracle | identical to oracle | identical to oracle | 1 | 0 |
+
+**Status: validated.** The reference passes every functional and regression case. It fails only the memory-dependent preference gates, by design, as with cattrs.
+
+**Declared deviation (D24):** the agent-phase verifier commands run as uid 0. Recorded in the decisions log.

@@ -15,6 +15,9 @@ Subcommands:
   render-prompt  shared "Required output artifacts" header built from task metadata + instruction.md
   manifest       sha256 list (sha256sum format, sorted) of every regular file under a directory
   trial-record   one sanitized trial-record.json; cases_total is task-specific (6 or 37)
+  verify-memory  check one memory folder against its expected official digest (counts and digest only)
+  balanced-order print the preregistered balanced TRIAL_ORDER (Latin rotation over the arms, 3 rounds)
+  aggregate      trials-summary.json for one job: trial records plus per-arm groups
 """
 
 from __future__ import annotations
@@ -49,6 +52,9 @@ PATCH_HEADER_ARTIFACT_LINE = (
     "working directory (`{workdir}`) against the task's base commit, as committed on HEAD.\n"
 )
 ZERO_CASES_CATEGORIES = ("NO_ARTIFACT", "CONTRACT_COLLECTION_ERROR", "COLLECTION_ERROR_OTHER")
+# Preregistration v1 section 3: 3 rounds of a Latin rotation over these five arms (A0 = no memory).
+PREREG_ARMS = ("A0", "R25", "M3", "G", "GR")
+PREREG_ROUNDS = 3
 
 
 def sha256_file(path: Path) -> str:
@@ -262,6 +268,7 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
         "job_id": args.job_id,
         "trial_index": args.index,
         "condition": args.condition,
+        "arm": args.arm or args.condition,
         "harness": "codex-cli",
         "model": args.model,
         "reasoning_effort": args.reasoning,
@@ -330,6 +337,76 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
     return 0
 
 
+# -------------------------------------------------------------------- verify-memory
+def cmd_verify_memory(args: argparse.Namespace) -> int:
+    # Same check as frontier_memory.memory.check_memory (stdlib only). Prints counts and the digest, never content.
+    sys.path.insert(0, str(HERE.parent / "frontiermemory" / "src"))
+    from frontier_memory.memory import check_memory  # noqa: E402
+
+    report = check_memory(Path(args.memory_dir).expanduser().resolve())
+    if not report["ok"]:
+        raise SystemExit(f"arm {args.name}: memory folder is invalid ({len(report['errors'])} check errors)")
+    digest = report["memory_sha256"]
+    if digest != args.expected_digest:
+        raise SystemExit(f"arm {args.name}: memory digest {digest} does not match the expected digest")
+    print(json.dumps({"arm": args.name, "memory_sha256": digest, "file_count": report["file_count"],
+                      "total_bytes": report["total_bytes"]}))
+    return 0
+
+
+# ------------------------------------------------------------------ balanced-order
+def balanced_order(arms: list[str], rounds: int) -> list[str]:
+    """Round r uses the arms list rotated left by r (r = 0, 1, ...). Each arm appears once per round."""
+    if len(set(arms)) != len(arms) or not arms:
+        raise SystemExit("arms must be non-empty and distinct")
+    order: list[str] = []
+    for r in range(rounds):
+        k = r % len(arms)
+        order.extend(arms[k:] + arms[:k])
+    return order
+
+
+def cmd_balanced_order(args: argparse.Namespace) -> int:
+    arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+    order = balanced_order(arms, args.rounds)
+    print(f'TRIAL_ORDER="{" ".join(order)}"')
+    print(f"# {len(order)} trials; {args.rounds} rounds; each arm {args.rounds} times; "
+          f"round r = arms rotated left by r")
+    return 0
+
+
+# ----------------------------------------------------------------------- aggregate
+def cmd_aggregate(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    records = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(run_dir.glob("trial-*/trial-record.json"))]
+    records.sort(key=lambda r: r["trial_index"])
+    groups: dict[str, dict] = {}
+    for r in records:
+        arm = r.get("arm") or r.get("condition")
+        g = groups.setdefault(arm, {"arm": arm, "condition": r.get("condition"), "trial_indices": [],
+                                    "trials": 0, "valid": 0, "strict_reward_sum": 0.0,
+                                    "cases_passed_sum": 0, "cases_total": r.get("cases_total"),
+                                    "failure_categories": {}})
+        g["trial_indices"].append(r["trial_index"])
+        g["trials"] += 1
+        if r.get("valid"):
+            g["valid"] += 1
+            g["strict_reward_sum"] += float(r.get("strict_reward") or 0.0)
+            g["cases_passed_sum"] += int(r.get("cases_passed") or 0)
+        cat = r.get("failure_category") or "UNKNOWN"
+        g["failure_categories"][cat] = g["failure_categories"].get(cat, 0) + 1
+    by_arm = []
+    for arm in sorted(groups, key=lambda a: groups[a]["trial_indices"][0]):
+        g = groups[arm]
+        g["strict_reward_mean"] = g["strict_reward_sum"] / g["valid"] if g["valid"] else None
+        g["cases_passed_mean"] = g["cases_passed_sum"] / g["valid"] if g["valid"] else None
+        by_arm.append(g)
+    (run_dir / "trials-summary.json").write_text(
+        json.dumps({"job_id": args.job_id, "trial_order": args.trial_order, "by_arm": by_arm, "trials": records},
+                   indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -359,6 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--job-id", required=True)
     p.add_argument("--index", type=int, required=True)
     p.add_argument("--condition", required=True, choices=["A", "B"])
+    p.add_argument("--arm", default="", help="arm name (A0, A, B, or a MEMORY_ARMS name); defaults to --condition")
     p.add_argument("--model", required=True)
     p.add_argument("--reasoning", required=True)
     p.add_argument("--harbor-exit", required=True)
@@ -373,6 +451,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ps-after", required=True)
     p.add_argument("--output")
     p.set_defaults(func=cmd_trial_record)
+
+    p = sub.add_parser("verify-memory")
+    p.add_argument("--name", required=True)
+    p.add_argument("--memory-dir", required=True)
+    p.add_argument("--expected-digest", required=True)
+    p.set_defaults(func=cmd_verify_memory)
+
+    p = sub.add_parser("balanced-order")
+    p.add_argument("--arms", default=",".join(PREREG_ARMS))
+    p.add_argument("--rounds", type=int, default=PREREG_ROUNDS)
+    p.set_defaults(func=cmd_balanced_order)
+
+    p = sub.add_parser("aggregate")
+    p.add_argument("--run-dir", required=True)
+    p.add_argument("--job-id", required=True)
+    p.add_argument("--trial-order", required=True)
+    p.set_defaults(func=cmd_aggregate)
     return parser
 
 

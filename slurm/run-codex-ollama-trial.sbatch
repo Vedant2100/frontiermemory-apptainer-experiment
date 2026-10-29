@@ -10,8 +10,13 @@
 #SBATCH --error=logs/codex-ollama-%j.err
 # Generic Codex CLI (0.157.0-alpha.11.1) + local Ollama trial. Model qwen3.8:27b-mtp-q4_K_M, num_ctx 65536,
 # reasoning effort medium. No OpenAI or ChatGPT credentials.
-# Env (forwarded by sbatch): TASK (build-word2vec-pipeline default, or dapt-intrusion-detection-workflow-learning),
-# TRIAL_ORDER (A/B tokens, default A), FROZEN_MEMORY_DIR and EXPECTED_MEMORY_DIGEST (needed for B).
+# Env (forwarded by sbatch): TASK (build-word2vec-pipeline default, dapt-intrusion-detection-workflow-learning,
+# or cattrs-compositional-changelog), TRIAL_ORDER (arm tokens, default A: A0/A = no memory, B = legacy single memory
+# with FROZEN_MEMORY_DIR and EXPECTED_MEMORY_DIGEST, or a MEMORY_ARMS NAME), MEMORY_ARMS
+# ("NAME=/abs/dir@digest;NAME2=/abs/dir2@digest2"). Every arm digest is verified at job start.
+# Balanced order for the preregistered arms:
+#   python3 scripts/codex_ollama_trial_helper.py balanced-order --arms A0,R25,M3,G,GR
+# Check a configuration without GPU work: bash scripts/run_codex_ollama_trial.sh --dry-run-arms
 # See scripts/run_codex_ollama_trial.sh for the full contract.
 set -euo pipefail
 cd /home/csgrad/vbork001/frontiermemory-experiment-20261024

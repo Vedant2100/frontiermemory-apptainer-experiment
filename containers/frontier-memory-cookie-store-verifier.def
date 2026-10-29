@@ -11,6 +11,11 @@ From: /home/csgrad/vbork001/frontiermemory-experiment-20261024/containers/fronti
 %post
     set -eu
     test "$(git -C /app rev-parse HEAD)" = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+    # %files copies into directories the base image already has, which nests the copies as /app/tests/tests and
+    # /app/.git/.git. Remove the nested duplicates (identical content) so pytest and git see one repository and one
+    # test tree, as in the official image.
+    rm -rf /app/tests/tests /app/.git/.git
+    test -z "$(git -C /app status --porcelain)"
     git -C /app cat-file -e HEAD:tests/conftest.py
     test -f /app/tests/conftest.py
     test -f /tests/test.sh
