@@ -174,3 +174,36 @@ These are frozen before any confirmatory trial.
 | Calendar | No fixed dates (user, 2026-10-29). Each task's job starts once its GPU smoke trial has run cleanly. Smoke and earlier exploratory trials are not pooled |
 
 Infrastructure reruns follow §3. If a task job is lost to infrastructure, the whole task job is rerun with the same order, and the loss is reported.
+
+## Amendment A4 (2026-10-29): memory exposure. Analysis only; added before any confirmatory memory trial
+
+**What we found.** These findings come from the exploratory trials (jobs 303129, 303133, 303198; 9 memory trials).
+- Codex 0.157 puts the memory summary (our `MEMORY.md`) into the prompt but keeps only its **first 5,000 and last 5,000 characters**. Everything in between is replaced by "…N tokens truncated…".
+- In those trials the agent never opened `MEMORY.md` or any topic file. So all the memory the model actually used was this window.
+- `scripts/memory_exposure.py` reproduces the window exactly ("match" on all three jobs).
+
+What each arm shows the model, by count of topic entries:
+
+| Arm | `MEMORY.md` size (chars) | Topic entries in `MEMORY.md` | Entries in the visible window |
+|---|---|---|---|
+| v5 (exploratory only) | 16,369 | 106 | 61 |
+| R25 | 26,893 | 116 | 65 (offline estimate; checked on its first trial) |
+| M3 | 46,625 | 324 | 83 |
+
+- M3's appended complete index falls mostly inside the truncated middle.
+- M3 *hides* all Word2Vec topics that v5 showed.
+- No arm makes a DAPT-specific topic visible.
+
+**Nothing below changes the arms, memories, order, tasks, k or primary analysis.**
+
+1. **Exposure covariate.** For every memory trial, record:
+   - the visible window, from the logged request bodies, checked against the offline reproduction;
+   - the topic files the agent opened, if any.
+2. **One directional prediction, stated now.**
+   - On build-word2vec-pipeline, M3's strict pass rate will not exceed A0's by more than 1 of 5 trials. The reason is that M3 shows no Word2Vec topic, whereas v5 did (and v5 went 0/3 → 3/3).
+   - This is descriptive and is not added to the Holm family.
+3. **Scope leakage.**
+   - The §4 rule is applied to the topic entries in the visible window as well as to opened files.
+   - "Content word" is frozen as: lowercase tokens split on non-alphanumerics, length > 2, excluding the stop list in `scripts/memory_exposure.py`.
+   - Generic words ("pipeline", "learning", "workflow") are *not* stop words under the frozen rule, so same-family counts are upper bounds. This is reported as a limitation.
+4. **Interpretation.** M3 was meant to add a complete index. Under this mechanism the index is mostly invisible. M3 is kept as frozen and reported as "a longer summary whose window differs from v5". It is not reported as "a full index".
