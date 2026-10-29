@@ -88,3 +88,15 @@ No-memory Word2Vec trials with the local model, on both harnesses: **0/15 strict
 - Temperature is not settable in Codex 0.157; the Ollama default was used in both arms.
 - The verifier network mode is `public`; agent containers have no egress isolation, but web search is disabled and Ollama is the only model endpoint.
 - Raw trajectories, memory text, agent workspaces and verifier output stay local.
+
+## Addendum (2026-10-29): exploratory follow-ups, not pooled with the confirmatory matrix
+
+| Job | Task | Arms | No memory (cases passed per trial) | Memory (cases passed per trial) | Strict |
+|---|---|---|---|---|---|
+| 303129 | DAPT, v5 replication | A vs v5 | 28, 21, 22 (mean 23.7/37) | 23, 19, 20 (mean 20.7/37) | 0/6 |
+| 303133 | DAPT | A vs M3 | 27, 19, 20 (mean 22.0/37) | 32, 28, 29 (mean 29.7/37) | 0/6 |
+| 303198 | cattrs | A vs v5 | 76, 76, 73 of 77 | 10, 76, 76 of 77 | 0/6 |
+
+- **DAPT:** the v5 gain from the first k=3 run did not replicate. M3 (v5 plus the full topic index) gained again. M3 was built after seeing v5's DAPT result, so this is a hypothesis, not a confirmation; it is tested in the preregistered matrix.
+- **cattrs:** no arm passes strictly. The one case even the reference solution fails is the memory-dependent user-preference check, and v5 did not supply that preference. One v5 trial collapsed to 10/77.
+- **Record integrity:** all 18 trials are valid. Each memory trial's seeded memory matches its frozen digest (v5 `94d59c2c…` or M3 `4a2eb528…`, 325 files); no-memory trials had none. The runner script was edited while 303129 and 303133 were running, and the edit reached their later trials (trial 6 of 303129, trials 4–6 of 303133). The only difference in those records is an extra `arm` metadata field. Prompt hash and Codex config are identical across all trials within each job (between jobs only the Ollama port differs). Since then, each job runs from a per-job snapshot of the runner (D15).
