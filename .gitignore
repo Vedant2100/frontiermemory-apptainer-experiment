@@ -21,6 +21,7 @@
 /results/cattrs-codex-ollama/
 /results/cookie-store-codex-ollama/
 /results/awilix-release-tier-*-codex-ollama/
+/results/customer-delivery-codex-ollama/
 /results/cattrs-oracle-check-*/
 
 # Cluster-only environments, caches, model files, and generated task copies.
@@ -52,3 +53,4 @@ scripts/.runner-snapshot-*.sh
 results/governor-run-*/
 results/cookie-store-oracle-check-*/
 results/awilix-*-oracle-check-[0-9]*/
+results/customer-delivery-oracle-check-[0-9]*/

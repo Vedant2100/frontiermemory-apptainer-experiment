@@ -51,9 +51,16 @@ TASK_SPECS = {
     #   cases_total 184 = regression 161 + functional 23 (oracle run: 161/161 and 23/23 passing, 1 skipped).
     #   The declared artifact is /logs/artifacts (a directory); the collect step writes model.patch inside it.
     "awilix-release-tier-implicit": {"cases_total": 184, "workdir": "/app", "artifact_mode": "patch",
-                                     "artifact_path": "/logs/artifacts", "verifier_format": "jest-sections"},
+                                     "artifact_path": "/logs/artifacts", "artifact_is_dir": True,
+                                     "verifier_format": "jest-sections"},
     "awilix-release-tier-explicit": {"cases_total": 184, "workdir": "/app", "artifact_mode": "patch",
-                                     "artifact_path": "/logs/artifacts", "verifier_format": "jest-sections"},
+                                     "artifact_path": "/logs/artifacts", "artifact_is_dir": True,
+                                     "verifier_format": "jest-sections"},
+    # customer-delivery: reward.json (grader.py) gives f2p (26) and p2p (162, incl. the "[gate] npm run build" id).
+    #   cases_total = 188. The preference check reports a CTRF summary (user-preference-ctrf.json), recorded as counts.
+    "customer-delivery-contextual-preferences": {"cases_total": 188, "workdir": "/app", "artifact_mode": "patch",
+                                                 "artifact_path": "/logs/artifacts/model.patch",
+                                                 "preference_format": "ctrf-summary"},
     "cattrs-compositional-changelog": {"cases_total": 77, "workdir": "/app", "artifact_mode": "patch",
                                        "artifact_path": "/logs/artifacts/model.patch"},
     # cookie-store: test.sh writes reward.txt (strict 0/1), functional-reward.txt, and two pytest summary lines in
@@ -73,6 +80,9 @@ PATCH_HEADER_ARTIFACT_LINE = (
     "collection step, not written by hand. After you finish, that step takes the diff of the repository in your "
     "working directory (`{workdir}`) against the task's base commit, as committed on HEAD.\n"
 )
+# Same text for a declared artifact path that is a directory (awilix: /logs/artifacts); cattrs/cookie keep the line above.
+PATCH_HEADER_ARTIFACT_DIR_LINE = PATCH_HEADER_ARTIFACT_LINE.replace(
+    "declares this file as a required output", "declares this artifact location as a required output")
 ZERO_CASES_CATEGORIES = ("NO_ARTIFACT", "CONTRACT_COLLECTION_ERROR", "COLLECTION_ERROR_OTHER")
 # Preregistration v1 section 3: 3 rounds of a Latin rotation over these five arms (A0 = no memory).
 PREREG_ARMS = ("A0", "R25", "M3", "G", "GR")
@@ -196,6 +206,20 @@ def parse_jest_sections(vdir: Path) -> dict:
     }
 
 
+def parse_ctrf_preference(vdir: Path) -> dict:
+    """Preference counts from the CTRF summary the preference verifier writes (user-preference-ctrf.json).
+
+    Harbor's verifier dir may hold it directly or under reports/ (test.sh moves framework reports there).
+    """
+    for candidate in (vdir / "user-preference-ctrf.json", vdir / "reports" / "user-preference-ctrf.json"):
+        data = read_json(candidate) if candidate.is_file() else None
+        if isinstance(data, dict):
+            summary = (data.get("results") or {}).get("summary") or {}
+            return {"preference_present": True, "preference_passed": int(summary.get("passed", 0)),
+                    "preference_total": int(summary.get("tests", 0))}
+    return {"preference_present": False, "preference_passed": None, "preference_total": None}
+
+
 def spec_for(task: str) -> dict:
     if task not in TASK_SPECS:
         raise SystemExit(f"unknown TASK {task!r}")
@@ -263,6 +287,7 @@ def cmd_task_meta(args: argparse.Namespace) -> int:
         collect = task["verifier"]["collect"][0]
         out.update({
             "artifact_mode": "patch",
+            "artifact_is_dir": bool(spec.get("artifact_is_dir", False)),
             "collect_command": collect["command"],
             "collect_timeout_sec": int(float(collect.get("timeout_sec", 60.0))),
         })
@@ -276,7 +301,8 @@ def cmd_render_prompt(args: argparse.Namespace) -> int:
     if meta.get("artifact_mode") == "patch":
         # Patch task: the declared file is produced by the collection step (task.toml [[verifier.collect]]),
         # so the header states that contract instead of asking for files to be created at exact paths.
-        header = "## Required output artifacts\n\n" + PATCH_HEADER_ARTIFACT_LINE.format(
+        line = PATCH_HEADER_ARTIFACT_DIR_LINE if meta.get("artifact_is_dir") else PATCH_HEADER_ARTIFACT_LINE
+        header = "## Required output artifacts\n\n" + line.format(
             path=meta["declared_artifacts"][0], workdir=meta["workdir"]) + "\n"
     else:
         # Same header wording as the word2vec base template (scripts/word2vec_ab_v2_records.py base-template).
@@ -413,6 +439,8 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
                 "user_preference_json_present": verifier["preference_json_present"],
                 "verifier_parse_note": verifier["parse_note"],
             })
+        if spec.get("preference_format") == "ctrf-summary":
+            patch_extra.update(parse_ctrf_preference(harbor_trial / "verifier" if harbor_trial else Path("/nonexistent")))
         if cookie_mode:
             patch_extra.update({
                 "verifier_format": "cookie-store-text",

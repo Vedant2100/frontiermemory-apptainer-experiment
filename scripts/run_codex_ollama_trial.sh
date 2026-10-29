@@ -96,12 +96,17 @@ case "${TASK}" in
     VERIFIER_SIF="${REPO}/containers/awilix-release-tier-explicit-verifier.sif"
     RUN_DIR="${REPO}/results/awilix-release-tier-explicit-codex-ollama/job-${JOB_ID}"
     ;;
-  *) echo "TASK must be build-word2vec-pipeline, dapt-intrusion-detection-workflow-learning, cattrs-compositional-changelog, cookie-store-compositional-changelog, awilix-release-tier-implicit, or awilix-release-tier-explicit: ${TASK}" >&2; exit 2 ;;
+  customer-delivery-contextual-preferences)
+    AGENT_SIF="${REPO}/containers/customer-delivery-contextual-preferences.sif"
+    VERIFIER_SIF="${REPO}/containers/customer-delivery-contextual-preferences-verifier.sif"
+    RUN_DIR="${REPO}/results/customer-delivery-codex-ollama/job-${JOB_ID}"
+    ;;
+  *) echo "TASK must be build-word2vec-pipeline, dapt-intrusion-detection-workflow-learning, cattrs-compositional-changelog, cookie-store-compositional-changelog, awilix-release-tier-implicit, awilix-release-tier-explicit, or customer-delivery-contextual-preferences: ${TASK}" >&2; exit 2 ;;
 esac
 # Working directory inside the agent container: /workspace (word2vec), /root (DAPT), or /app (patch repos).
 case "${TASK}" in
   build-word2vec-pipeline) WORKDIR_IN=/workspace ;;
-  cattrs-compositional-changelog|cookie-store-compositional-changelog|awilix-release-tier-implicit|awilix-release-tier-explicit) WORKDIR_IN=/app ;;
+  cattrs-compositional-changelog|cookie-store-compositional-changelog|awilix-release-tier-implicit|awilix-release-tier-explicit|customer-delivery-contextual-preferences) WORKDIR_IN=/app ;;
   *) WORKDIR_IN=/root ;;
 esac
 IS_W2V=0
@@ -111,7 +116,7 @@ IS_W2V=0
 IS_AWILIX=0
 [[ "${TASK}" == awilix-release-tier-implicit || "${TASK}" == awilix-release-tier-explicit ]] && IS_AWILIX=1
 IS_PATCH=0
-[[ "${TASK}" == cattrs-compositional-changelog || "${TASK}" == cookie-store-compositional-changelog ]] && IS_PATCH=1
+[[ "${TASK}" == cattrs-compositional-changelog || "${TASK}" == cookie-store-compositional-changelog || "${TASK}" == customer-delivery-contextual-preferences ]] && IS_PATCH=1
 [[ "${IS_AWILIX}" == 1 ]] && IS_PATCH=1
 IS_DAPT=0
 [[ "${TASK}" == dapt-intrusion-detection-workflow-learning ]] && IS_DAPT=1
@@ -318,6 +323,7 @@ if [[ "${IS_PATCH}" == 1 ]]; then
   case "${TASK}" in
     cookie-store-compositional-changelog) PROBE="python3 -c 'import httpx' && echo httpx-ok" ;;
     awilix-release-tier-*) PROBE="test -d /app/node_modules && node -v && npm -v" ;;
+    customer-delivery-contextual-preferences) PROBE="test -d /app/node_modules && test -d /opt/jest-ctrf/node_modules/jest-ctrf-json-reporter && node -v && npm -v" ;;
     *) PROBE="true" ;;
   esac
   PREFLIGHT_CMD="git -C /app rev-parse HEAD && git -C /app rev-parse --verify '${COLLECT_REF}^{commit}' && git -C /app merge-base --is-ancestor '${BASE_COMMIT}' HEAD && git -C /app status --porcelain | wc -l && ${PROBE}"

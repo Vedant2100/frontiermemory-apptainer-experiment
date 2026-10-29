@@ -1,0 +1,28 @@
+# Verifier image for customer-delivery-contextual-preferences (Harbor separate verifier): the official task image
+# (same v1.1 digest as the agent) with the official tests/ directory. test.sh and original tooling switch to the agent
+# user with runuser, so `agent` is aliased to uid/gid 0 (same cluster workaround as the cookie-store v3 and awilix
+# verifier images). Test files are unchanged.
+Bootstrap: docker
+From: public.ecr.aws/d3j8x8q7/swe-bench-202605@sha256:748294a8ece567691f0a628d03c3531024d9f5e1acd13d5c6dd1ecba490831e6
+
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/customer-delivery-contextual-preferences/tests /tests
+
+%post
+    set -eu
+    test -f /tests/test.sh
+    chmod 755 /tests
+    chmod +x /tests/test.sh
+    if ! command -v runuser >/dev/null 2>&1; then \
+      if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends passwd util-linux && rm -rf /var/lib/apt/lists/*; \
+      else echo 'unsupported verifier base image: runuser is required' >&2; exit 1; fi; \
+    fi
+    test -x /usr/sbin/runuser || test -x "$(command -v runuser)"
+    sed -i '/^agent:/d' /etc/passwd /etc/group
+    printf '%s\n' 'agent:x:0:0:Harbor agent (aliased to uid 0, see def):/home/agent:/bin/sh' >> /etc/passwd
+    printf '%s\n' 'agent:x:0:' >> /etc/group
+    mkdir -p /home/agent /logs/verifier
+    chmod 700 /logs/verifier
+    test -d /app/node_modules
+    test -d /opt/jest-ctrf/node_modules/jest-ctrf-json-reporter
+    test "$(git -C /app rev-parse HEAD)" = "82ac179c1de4c216c4e333093044fac643303f0c"

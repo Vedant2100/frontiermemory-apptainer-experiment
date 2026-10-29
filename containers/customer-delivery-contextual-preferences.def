@@ -1,0 +1,17 @@
+# Agent image for customer-delivery-contextual-preferences: the official task image named in task.toml
+# (swe-bench-202605 digest 748294a8...; tag kh70...-v1.1), used unmodified. The environment Dockerfile's steps (clone at
+# 82ac179, npm install, package-lock restore, out-of-tree CTRF reporter under /opt/jest-ctrf, hooks disabled) are
+# part of that image. Checks only; nothing is installed here (compute nodes have no registry access).
+Bootstrap: docker
+From: public.ecr.aws/d3j8x8q7/swe-bench-202605@sha256:748294a8ece567691f0a628d03c3531024d9f5e1acd13d5c6dd1ecba490831e6
+
+%post
+    set -eu
+    test "$(git -C /app rev-parse HEAD)" = "82ac179c1de4c216c4e333093044fac643303f0c"
+    test -z "$(git -C /app status --porcelain)"
+    test -d /app/node_modules
+    test -d /opt/jest-ctrf/node_modules/jest-ctrf-json-reporter
+    test -d /opt/jest-ctrf/node_modules/jest-environment-node
+    test "$(git -C /app config core.hooksPath)" = "/dev/null"
+    node -v
+    npm -v
