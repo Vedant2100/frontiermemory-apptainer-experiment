@@ -18,7 +18,8 @@ def set_section_key(text: str, section_name: str, key: str, value: str) -> str:
     if match is None:
         raise ValueError(f"Missing TOML section {header}")
     body_start = match.end()
-    next_section = re.search(r"(?m)^\[[^\]]+\]\s*$", text[body_start:])
+    # Array-of-tables headers such as [[verifier.collect]] also end a section (otherwise keys are appended to them).
+    next_section = re.search(r"(?m)^\[\[?[^\]]+\]\]?\s*$", text[body_start:])
     body_end = body_start + next_section.start() if next_section else len(text)
     body = text[body_start:body_end]
     replacement = f"{key} = {json.dumps(value)}"
@@ -76,6 +77,13 @@ def main() -> int:
         "network_mode",
         "public",
     )
+    # Harbor's Singularity backend also rejects no-network for the agent. Only a declared [agent] network_mode is
+    # changed (the word2vec and DAPT tasks declare none, so their staged copies are unchanged).
+    # The same applies to a top-level [verifier] network_mode (declared by the patch tasks, not by word2vec or DAPT).
+    for section_name in ("agent", "verifier"):
+        section = re.search(rf"(?ms)^\[{section_name}\]\s*$(.*?)(?=^\[|\Z)", text)
+        if section and re.search(r"(?m)^[ \t]*network_mode\s*=", section.group(1)):
+            text = set_section_key(text, section_name, "network_mode", "public")
     (destination / "task.toml").write_text(text, encoding="utf-8")
 
     config = tomllib.loads(text)

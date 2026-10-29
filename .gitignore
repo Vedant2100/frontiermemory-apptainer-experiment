@@ -17,6 +17,9 @@
 /results/awilix-ab-*-harbor-exits.txt
 /results/codex-awilix-frontier-2026-10-26/
 /results/word2vec-*/
+# Raw cattrs patch-task trials and oracle check: patches, verifier output, and solution-derived files.
+/results/cattrs-codex-ollama/
+/results/cattrs-oracle-check-*/
 
 # Cluster-only environments, caches, model files, and generated task copies.
 /.venv/
@@ -43,3 +46,4 @@ __pycache__/
 
 # Raw DAPT oracle/nop trial outputs (verifier logs, staged task copies).
 /results/frontiermemory-dapt/oracle-check-*/
+scripts/.runner-snapshot-*.sh

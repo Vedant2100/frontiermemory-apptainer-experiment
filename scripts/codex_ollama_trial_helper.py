@@ -34,9 +34,20 @@ SCHEMA = "codex-ollama-trial-record/1"
 USAGE_KEYS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens")
 TASK_SPECS = {
     # cases_total: verifier cases in the task (word2vec: 6; DAPT: 37, oracle 37/37 in the DAPT oracle check).
+    # artifact_mode "file" (default): the agent writes the declared file under workdir.
+    # artifact_mode "patch": the agent edits the repository in workdir; the task's [[verifier.collect]]
+    #   command writes the declared patch. The verifier reports f2p/p2p totals in reward.json, and
+    #   cases_total is their sum (cattrs: 70 + 7, matched by the oracle check).
     "build-word2vec-pipeline": {"cases_total": 6, "workdir": "/workspace"},
     "dapt-intrusion-detection-workflow-learning": {"cases_total": 37, "workdir": "/root"},
+    "cattrs-compositional-changelog": {"cases_total": 77, "workdir": "/app", "artifact_mode": "patch",
+                                       "artifact_path": "/logs/artifacts/model.patch"},
 }
+PATCH_HEADER_ARTIFACT_LINE = (
+    "The official task metadata declares this file as a required output: `{path}`. It is produced by the task's "
+    "collection step, not written by hand. After you finish, that step takes the diff of the repository in your "
+    "working directory (`{workdir}`) against the task's base commit, as committed on HEAD.\n"
+)
 ZERO_CASES_CATEGORIES = ("NO_ARTIFACT", "CONTRACT_COLLECTION_ERROR", "COLLECTION_ERROR_OTHER")
 
 
@@ -49,6 +60,22 @@ def read_text_or_empty(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def parse_reward_json(path: Path) -> dict:
+    """Counts from a patch task's verifier/reward.json (written by the official test.sh).
+
+    Format seen in prior cattrs runs: {"reward": 0|1, "f2p_total", "f2p_passed", "p2p_total", "p2p_passed",
+    "f2p", "p2p", "partial"}. Functional-to-pass plus pass-to-pass give the per-case totals.
+    """
+    data = read_json(path) if path.is_file() else None
+    if not isinstance(data, dict) or "reward" not in data:
+        return {"output_present": False, "collected": 0, "passed": 0, "failed": 0, "errors": 0,
+                "skipped": 0, "collection_error": False, "parse_note": "reward.json absent"}
+    collected = int(data.get("f2p_total", 0)) + int(data.get("p2p_total", 0))
+    passed = int(data.get("f2p_passed", 0)) + int(data.get("p2p_passed", 0))
+    return {"output_present": True, "collected": collected, "passed": passed, "failed": collected - passed,
+            "errors": 0, "skipped": 0, "collection_error": collected == 0, "parse_note": None}
 
 
 def spec_for(task: str) -> dict:
@@ -64,8 +91,15 @@ def cmd_task_meta(args: argparse.Namespace) -> int:
     if task["task"]["name"] and args.task not in task["task"]["name"]:
         raise SystemExit(f"task.toml name {task['task']['name']!r} does not match TASK {args.task!r}")
     artifacts = task.get("artifacts", [])
+    mode = spec.get("artifact_mode", "file")
     prefix = spec["workdir"] + "/"
-    if not artifacts or any(not isinstance(p, str) or not p.startswith(prefix) for p in artifacts):
+    if mode == "patch":
+        if artifacts != [spec["artifact_path"]]:
+            raise SystemExit(f"Unexpected artifact metadata for patch task: {artifacts!r}")
+        collects = task["verifier"].get("collect") or []
+        if len(collects) != 1 or spec["artifact_path"] not in collects[0].get("command", ""):
+            raise SystemExit("patch task needs one [[verifier.collect]] command that writes the declared artifact")
+    elif not artifacts or any(not isinstance(p, str) or not p.startswith(prefix) for p in artifacts):
         raise SystemExit(f"Unexpected or missing artifact metadata: {artifacts!r}")
     if len(artifacts) != 1:
         raise SystemExit("this runner grades exactly one declared artifact")
@@ -76,7 +110,7 @@ def cmd_task_meta(args: argparse.Namespace) -> int:
         "task": args.task,
         "task_name": task["task"]["name"],
         "declared_artifacts": artifacts,
-        "artifact_rel": [p[len(prefix):] for p in artifacts],
+        "artifact_rel": [p[len(prefix):] if mode == "file" else p.lstrip("/") for p in artifacts],
         "workdir": spec["workdir"],
         "cases_total": spec["cases_total"],
         "agent_timeout_sec": task["agent"]["timeout_sec"],
@@ -84,6 +118,13 @@ def cmd_task_meta(args: argparse.Namespace) -> int:
         "verifier_network_mode_staged": verifier["network_mode"],
         "network_egress_isolation_enforced": False,
     }
+    if mode == "patch":
+        collect = task["verifier"]["collect"][0]
+        out.update({
+            "artifact_mode": "patch",
+            "collect_command": collect["command"],
+            "collect_timeout_sec": int(float(collect.get("timeout_sec", 60.0))),
+        })
     Path(args.output).write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     return 0
 
@@ -91,14 +132,20 @@ def cmd_task_meta(args: argparse.Namespace) -> int:
 # ----------------------------------------------------------------- render-prompt
 def cmd_render_prompt(args: argparse.Namespace) -> int:
     meta = json.loads(Path(args.task_meta).read_text(encoding="utf-8"))
-    # Same header wording as the word2vec base template (scripts/word2vec_ab_v2_records.py base-template).
-    header = (
-        "## Required output artifacts\n\n"
-        "The official task metadata declares these files as required outputs. "
-        "Create the implementation at each exact path so Harbor can collect it:\n"
-        + "".join(f"- `{path}`\n" for path in meta["declared_artifacts"])
-        + "\n"
-    )
+    if meta.get("artifact_mode") == "patch":
+        # Patch task: the declared file is produced by the collection step (task.toml [[verifier.collect]]),
+        # so the header states that contract instead of asking for files to be created at exact paths.
+        header = "## Required output artifacts\n\n" + PATCH_HEADER_ARTIFACT_LINE.format(
+            path=meta["declared_artifacts"][0], workdir=meta["workdir"]) + "\n"
+    else:
+        # Same header wording as the word2vec base template (scripts/word2vec_ab_v2_records.py base-template).
+        header = (
+            "## Required output artifacts\n\n"
+            "The official task metadata declares these files as required outputs. "
+            "Create the implementation at each exact path so Harbor can collect it:\n"
+            + "".join(f"- `{path}`\n" for path in meta["declared_artifacts"])
+            + "\n"
+        )
     instruction = Path(args.instruction).read_text(encoding="utf-8")
     Path(args.output).write_text(header + instruction, encoding="utf-8")
     print(sha256_file(Path(args.output)))
@@ -149,8 +196,13 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
     # DAPT: the template is already present, so the artifact counts only if the agent changed it.
     artifact_ok = artifact_exists and (not args.artifact_start_sha or artifact_sha != args.artifact_start_sha)
 
-    verifier = parse_verifier(harbor_trial / "verifier" / "test-stdout.txt") if harbor_trial else \
-        parse_verifier(Path("/nonexistent"))
+    patch_mode = spec.get("artifact_mode") == "patch"
+    if patch_mode:
+        verifier = parse_reward_json(harbor_trial / "verifier" / "reward.json") if harbor_trial else \
+            parse_reward_json(Path("/nonexistent"))
+    else:
+        verifier = parse_verifier(harbor_trial / "verifier" / "test-stdout.txt") if harbor_trial else \
+            parse_verifier(Path("/nonexistent"))
     reward = None
     if result.get("verifier_result"):
         reward = (result["verifier_result"].get("rewards") or {}).get("reward")
@@ -159,6 +211,8 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
             reward = float((harbor_trial / "verifier" / "reward.txt").read_text().strip())
         except ValueError:
             reward = None
+    if reward is None and patch_mode and harbor_trial and (harbor_trial / "verifier" / "reward.json").is_file():
+        reward = (read_json(harbor_trial / "verifier" / "reward.json") or {}).get("reward")
 
     exc = result.get("exception_info")
     exc_type = exc.get("exception_type") if isinstance(exc, dict) else None
@@ -178,6 +232,22 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
         # A missing attribute is the agent's contract error; any other collection error is COLLECTION_ERROR_OTHER.
         if "AttributeError" not in read_text_or_empty(harbor_trial / "verifier" / "test-stdout.txt"):
             category = "COLLECTION_ERROR_OTHER"
+    patch_extra = {}
+    if patch_mode:
+        # Grading must have seen the same patch the runner saved: compare Harbor's collected file with ours.
+        saved = tdir / "model.patch"
+        saved_sha = sha256_file(saved) if saved.is_file() else None
+        collected_file = harbor_trial / "artifacts" / "logs" / "artifacts" / "model.patch" if harbor_trial else None
+        harbor_sha = sha256_file(collected_file) if collected_file and collected_file.is_file() else None
+        if category != "INVALID_INFRA" and saved_sha is not None and harbor_sha != saved_sha:
+            category, invalid_reason = "INVALID_INFRA", "harbor_collected_patch_mismatch"
+        patch_extra = {
+            "artifact_mode": "patch",
+            "harbor_collected_patch_sha256": harbor_sha,
+            "collect_exit_code": int(read_text_or_empty(tdir / "collect-exit.txt").strip() or -1),
+            "verifier_reward_json_present": verifier["output_present"],
+            "cases_total_matches_verifier": verifier["collected"] == cases_total,
+        }
     valid = category != "INVALID_INFRA"
     cases_passed = strict_reward = None
     if valid:
@@ -249,6 +319,7 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
         "memory_mode": args.memory_mode,
         "network_egress_isolation_enforced": False,
     }
+    record.update(patch_extra)
     if args.task == "build-word2vec-pipeline":
         record["cases_passed_of_6"] = cases_passed  # kept only for word2vec compatibility
     out = Path(args.output) if args.output else tdir / "trial-record.json"

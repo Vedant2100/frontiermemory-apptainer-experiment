@@ -15,4 +15,8 @@
 # See scripts/run_codex_ollama_trial.sh for the full contract.
 set -euo pipefail
 cd /home/csgrad/vbork001/frontiermemory-experiment-20261024
-exec bash scripts/run_codex_ollama_trial.sh
+# Run a private snapshot of the runner so edits to the repo copy cannot change a job mid-run (bash reads scripts lazily).
+# The copy stays in scripts/ because the runner locates the repo from its own path.
+RUNNER_SNAPSHOT="scripts/.runner-snapshot-${SLURM_JOB_ID:-$$}.sh"
+cp scripts/run_codex_ollama_trial.sh "${RUNNER_SNAPSHOT}"
+exec bash "${RUNNER_SNAPSHOT}"

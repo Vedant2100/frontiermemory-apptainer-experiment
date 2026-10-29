@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Generic Codex CLI trial with a LOCAL model: Codex talks to an Ollama server that this Slurm GPU job
 # starts itself (qwen3.8:27b-mtp-q4_K_M, num_ctx 65536, reasoning effort medium).
-# TASK selects the task: build-word2vec-pipeline (workspace /workspace, 6 cases) or
-# dapt-intrusion-detection-workflow-learning (working dir /root, artifact /root/network_stats.csv, 37 cases).
+# TASK selects the task: build-word2vec-pipeline (workspace /workspace, 6 cases),
+# dapt-intrusion-detection-workflow-learning (working dir /root, artifact /root/network_stats.csv, 37 cases), or
+# cattrs-compositional-changelog (patch task: repo /app, declared artifact /logs/artifacts/model.patch from the
+# task's [[verifier.collect]] command, 77 cases). For the patch task the runner runs that collect command on the
+# agent's repo after Codex finishes, saves model.patch in the trial directory, and grades it through Harbor.
 # scripts/run_codex_ollama_word2vec_trial.sh is the earlier word2vec-only runner and is left unchanged.
 #
 # No OpenAI or ChatGPT credentials are used: no auth.json is copied, the container runs with --containall
@@ -61,12 +64,29 @@ case "${TASK}" in
     VERIFIER_SIF="${REPO}/containers/frontier-memory-dapt-verifier-v2.sif"
     RUN_DIR="${REPO}/results/frontiermemory-dapt/codex-ollama-job-${JOB_ID}"
     ;;
-  *) echo "TASK must be build-word2vec-pipeline or dapt-intrusion-detection-workflow-learning: ${TASK}" >&2; exit 2 ;;
+  cattrs-compositional-changelog)
+    AGENT_SIF="${REPO}/containers/frontier-memory-cattrs.sif"
+    VERIFIER_SIF="${REPO}/containers/frontier-memory-cattrs-verifier.sif"
+    RUN_DIR="${REPO}/results/cattrs-codex-ollama/job-${JOB_ID}"
+    ;;
+  *) echo "TASK must be build-word2vec-pipeline, dapt-intrusion-detection-workflow-learning, or cattrs-compositional-changelog: ${TASK}" >&2; exit 2 ;;
 esac
-# Working directory inside the agent container: /workspace (word2vec) or /root (DAPT).
-if [[ "${TASK}" == build-word2vec-pipeline ]]; then WORKDIR_IN=/workspace; else WORKDIR_IN=/root; fi
+# Working directory inside the agent container: /workspace (word2vec), /root (DAPT), or /app (cattrs repo).
+case "${TASK}" in
+  build-word2vec-pipeline) WORKDIR_IN=/workspace ;;
+  cattrs-compositional-changelog) WORKDIR_IN=/app ;;
+  *) WORKDIR_IN=/root ;;
+esac
 IS_W2V=0
 [[ "${TASK}" == build-word2vec-pipeline ]] && IS_W2V=1
+# Patch task: the agent edits a repository copy (populated from the image's /app, like DAPT's /root), and the
+# declared artifact is the patch that the task's collect command produces from that repository.
+IS_PATCH=0
+[[ "${TASK}" == cattrs-compositional-changelog ]] && IS_PATCH=1
+IS_DAPT=0
+[[ "${TASK}" == dapt-intrusion-detection-workflow-learning ]] && IS_DAPT=1
+# Image directory that a per-trial working directory is copied from (same as WORKDIR_IN for file tasks).
+IMAGE_WORKDIR="${WORKDIR_IN}"
 
 TRIAL_ORDER="${TRIAL_ORDER:-A}"
 read -r -a TRIAL_TOKENS <<<"${TRIAL_ORDER}"
@@ -157,6 +177,10 @@ if [[ "${IS_W2V}" == 1 ]]; then printf '%s\n' "${TEMPLATE_SHA}  ${PROMPT_TEMPLAT
 TRIAL_TIMEOUT_SEC="$("${PY}" -c 'import json,sys; print(int(float(json.load(open(sys.argv[1]))["agent_timeout_sec"])))' "${RUN_DIR}/preflight/task-meta.json")"
 ARTIFACT_REL="$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["artifact_rel"][0])' "${RUN_DIR}/preflight/task-meta.json")"
 CASES_TOTAL="$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["cases_total"])' "${RUN_DIR}/preflight/task-meta.json")"
+# Patch tasks only: the task's own [[verifier.collect]] command and its timeout (empty for file tasks).
+COLLECT_COMMAND="$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("collect_command", ""))' "${RUN_DIR}/preflight/task-meta.json")"
+COLLECT_TIMEOUT_SEC="$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("collect_timeout_sec", 300))' "${RUN_DIR}/preflight/task-meta.json")"
+if [[ "${IS_PATCH}" == 1 && -z "${COLLECT_COMMAND}" ]]; then echo "patch task without a collect command" >&2; exit 2; fi
 printf 'TASK=%s\nHARBOR_SINGULARITY_EXEC_TIMEOUT_SEC=%s\nTRIAL_TIMEOUT_SEC=%s\nPROBE_TIMEOUT_SEC=%s\nGRADE_GUARD=%s\nOLLAMA_PORT=%s\nWORKDIR_IN=%s\nARTIFACT_REL=%s\nCASES_TOTAL=%s\n' \
   "${TASK}" "${HARBOR_SINGULARITY_EXEC_TIMEOUT_SEC}" "${TRIAL_TIMEOUT_SEC}" "${PROBE_TIMEOUT_SEC}" "${GRADE_GUARD}" \
   "${OLLAMA_PORT}" "${WORKDIR_IN}" "${ARTIFACT_REL}" "${CASES_TOTAL}" >"${RUN_DIR}/run-settings.txt"
@@ -167,7 +191,7 @@ nvidia-smi -q >"${RUN_DIR}/nvidia-smi.txt"
 apptainer version >"${RUN_DIR}/apptainer-version.txt"
 
 # ------------------------------------------------- DAPT: image /root and verifier checks (hash level)
-if [[ "${IS_W2V}" == 0 ]]; then
+if [[ "${IS_DAPT}" == 1 ]]; then
   # Official task file hashes and verifier-image test hashes (hashing only, as in the DAPT oracle check).
   (cd "${SOURCE_TASK}" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"${RUN_DIR}/official-task-sha256.txt"
   sha256sum "${SOURCE_TASK}/tests/test.sh" "${SOURCE_TASK}/tests/test_outputs.py" >"${RUN_DIR}/verifier-source-sha256.txt"
@@ -191,6 +215,23 @@ PY
     'python3 -c "import scapy,pandas,numpy,sys; print(\"agent-python\",sys.version.split()[0])"' >"${RUN_DIR}/preflight/agent-python.txt" 2>&1
 fi
 
+# ------------------------------------------- patch task: verifier test hashes, image repo at base commit
+if [[ "${IS_PATCH}" == 1 ]]; then
+  (cd "${SOURCE_TASK}/tests" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"${RUN_DIR}/verifier-source-tests-sha256.txt"
+  apptainer exec --fakeroot --pwd /tests "${VERIFIER_SIF}" /bin/bash -c \
+    'cd /tests && find . -type f -print0 | sort -z | xargs -0 sha256sum' >"${RUN_DIR}/verifier-image-tests-sha256.txt"
+  if ! diff <(sort "${RUN_DIR}/verifier-source-tests-sha256.txt") <(sort "${RUN_DIR}/verifier-image-tests-sha256.txt") >/dev/null; then
+    echo "Verifier SIF test files differ from the pinned task source" >&2; exit 5
+  fi
+  BASE_COMMIT="$("${PY}" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["metadata"]["base_commit_hash"])' "${SOURCE_TASK}/task.toml")"
+  apptainer exec --containall --cleanenv --no-home --pwd "${IMAGE_WORKDIR}" "${AGENT_SIF}" /bin/bash -c \
+    'git -C /app rev-parse HEAD; git -C /app status --porcelain | wc -l' >"${RUN_DIR}/preflight/image-repo-head.txt"
+  grep -qx "${BASE_COMMIT}" "${RUN_DIR}/preflight/image-repo-head.txt" || { echo "image /app HEAD is not the base commit" >&2; exit 5; }
+  # Agent image manifest of the repository (the template for every trial's populated /app).
+  apptainer exec --containall --cleanenv --no-home --pwd "${IMAGE_WORKDIR}" "${AGENT_SIF}" /bin/bash -c \
+    'find . -type f -print0 | sort -z | xargs -0 sha256sum' >"${RUN_DIR}/preflight/image-root-sha256.txt"
+fi
+
 # Fill a per-trial working directory from the image's /root and check it against the image manifest.
 populate_workdir() {  # $1 = host directory to become WORKDIR_IN inside the agent container
   local dest="$1"
@@ -200,7 +241,7 @@ populate_workdir() {  # $1 = host directory to become WORKDIR_IN inside the agen
     chmod 777 "${dest}"
     return 0
   fi
-  apptainer exec --containall --cleanenv --no-home --pwd /root "${AGENT_SIF}" tar -C /root -cf - . 2>>"${dest}.populate.log" \
+  apptainer exec --containall --cleanenv --no-home --pwd "${IMAGE_WORKDIR}" "${AGENT_SIF}" tar -C "${IMAGE_WORKDIR}" -cf - . 2>>"${dest}.populate.log" \
     | tar -C "${dest}" -xf - 2>>"${dest}.populate.log"
   "${PY}" "${TASK_HELPER}" manifest --root "${dest}" --output "${dest}.manifest-sha256.txt"
   if ! diff <(sort "${RUN_DIR}/preflight/image-root-sha256.txt") <(sort "${dest}.manifest-sha256.txt") >"${dest}.manifest.diff"; then
@@ -326,6 +367,11 @@ echo "ollama_api_version_from_container=$(curl -s --max-time 20 http://__OLLAMA_
 echo "memories_feature=$(codex features list 2>/dev/null | awk '$1=="memories" {print $NF}')"
 echo "disabled_features_not_false=$(codex features list 2>/dev/null | awk '$1=="plugins"||$1=="apps"||$1=="browser_use"||$1=="multi_agent"||$1=="computer_use"||$1=="remote_plugin"||$1=="plugin_sharing"||$1=="in_app_browser" {if ($NF!="false") print $1}' | tr '\n' ' ')"
 EOF
+if [[ "${IS_PATCH}" == 1 ]]; then
+  cat >>"${RUN_DIR}/preflight/container-check.sh" <<'EOF'
+echo "workdir_git=$( [ -d __WORKDIR__/.git ] && echo yes || echo no )"
+EOF
+fi
 sed -i -e "s|__OLLAMA_HOST_PORT__|${OLLAMA_HOST_PORT}|" -e "s|__WORKDIR__|${WORKDIR_IN}|g" "${RUN_DIR}/preflight/container-check.sh"
 build_codex_cmd "${PRE_WS}" "${PRE_CH}"
 set +e
@@ -337,6 +383,8 @@ if [[ "${PRE_RC}" != 0 ]]; then echo "container preflight exited ${PRE_RC}" >&2;
 grep -qx 'host_home_visible=no' "${PRE_OUT}" || { echo "preflight: host /home/csgrad is visible in the container" >&2; exit 6; }
 if [[ "${IS_W2V}" == 1 ]]; then
   grep -qx 'workdir_entries_at_start=0' "${PRE_OUT}" || { echo "preflight: /workspace is not empty" >&2; exit 6; }
+elif [[ "${IS_PATCH}" == 1 ]]; then
+  grep -qx 'workdir_git=yes' "${PRE_OUT}" || { echo "preflight: no repository (.git) in ${WORKDIR_IN}" >&2; exit 6; }
 else
   grep -qx 'workdir_packets_pcap=yes' "${PRE_OUT}" || { echo "preflight: /root/packets.pcap is missing in the container" >&2; exit 6; }
 fi
@@ -382,6 +430,26 @@ printf '%s\n' "${VARIANT}" >"${RUN_DIR}/preflight/provider-variant.txt"
 ps_snapshot "${RUN_DIR}/ollama/ps-before-trials.json"
 "${PY}" -c 'import json,sys; ms=json.load(open(sys.argv[1])).get("models") or []; ctx=[m.get("context_length") for m in ms if m.get("name")==sys.argv[2]]; print("loaded_context_length", ctx); sys.exit(0 if ctx==[int(sys.argv[3])] else 1)' "${RUN_DIR}/ollama/ps-before-trials.json" "${MODEL}" "${OLLAMA_CONTEXT_LENGTH}" >"${RUN_DIR}/ollama/loaded-context-check.txt" || { echo "Loaded model context is not ${OLLAMA_CONTEXT_LENGTH}; see ollama/ps-before-trials.json" >&2; exit 8; }
 
+# Patch tasks: run the task's own [[verifier.collect]] command on the agent's repository after Codex has finished,
+# as Harbor does after the agent phase. The repository is bound at WORKDIR_IN; /logs is a host directory so the
+# command's /logs/artifacts/model.patch lands there. Saves ${2}/model.patch (copied, not modified) and the exit code.
+run_patch_collect() {  # $1 = agent workspace (bound at WORKDIR_IN), $2 = trial directory
+  local tdir="$2" cdir="$2/collect" rc
+  rm -rf "${cdir}"
+  mkdir -p "${cdir}/logs" "${cdir}/home"
+  chmod 700 "${cdir}/home"
+  set +e
+  timeout --signal=INT --kill-after=30s "${COLLECT_TIMEOUT_SEC}" apptainer exec --containall --cleanenv \
+    --writable-tmpfs --home "${cdir}/home:/collect-home" \
+    --pwd "${WORKDIR_IN}" --bind "$1:${WORKDIR_IN}" --bind "${cdir}/logs:/logs" \
+    "${AGENT_SIF}" /bin/bash -c "${COLLECT_COMMAND}" >"${tdir}/collect-stdout.txt" 2>"${tdir}/collect-stderr.txt"
+  rc=$?
+  set -e
+  printf '%s\n' "${rc}" >"${tdir}/collect-exit.txt"
+  if [[ -f "${cdir}/logs/artifacts/model.patch" ]]; then cp -p "${cdir}/logs/artifacts/model.patch" "${tdir}/model.patch"; fi
+  rm -rf "${cdir}"
+}
+
 # ---------------------------------------------------------------- one trial
 run_trial() {
   local index="$1" condition="$2"
@@ -396,6 +464,8 @@ run_trial() {
   local grade_job="${job_name}-grade"
   local mounts_json prompt_sha config_sha memory_sha="" codex_rc grade_rc timed_out="false" t0 t1 gin_start
   local mode="none" start_sha="" artifact_final="${ws}/${ARTIFACT_REL}"
+  # Patch task: the graded artifact is the patch saved by run_patch_collect in the trial directory.
+  [[ "${IS_PATCH}" == 1 ]] && artifact_final="${tdir}/model.patch"
   [[ "${condition}" == B ]] && mode="native-memories-folder"
 
   mkdir -p "${tdir}" "${gdir}"
@@ -464,6 +534,9 @@ run_trial() {
   if [[ "${IS_W2V}" == 0 ]]; then
     "${PY}" "${TASK_HELPER}" manifest --root "${ws}" --output "${tdir}/final-files-sha256.txt"
   fi
+  if [[ "${IS_PATCH}" == 1 ]]; then
+    run_patch_collect "${ws}" "${tdir}"
+  fi
 
   # 4. Grade with the unchanged verifier through Harbor's nop agent (wrapped path, as in the oracle check).
   mkdir -p "${gdir}"
@@ -472,6 +545,14 @@ run_trial() {
     chmod 777 "${gws}"
     cp -a "${ws}/." "${gws}/"
     mounts_json="$("${PY}" -c 'import json,sys; p,w=sys.argv[1:]; print(json.dumps([{"type":"bind","source":p+"/bin/python3.12","target":"/usr/bin/python3"},{"type":"bind","source":w,"target":"/workspace"}]))' "${PYTHON_SOURCE}" "${gws}")"
+  elif [[ "${IS_PATCH}" == 1 ]]; then
+    # Patch task: the nop container gets a copy of the agent's repository at WORKDIR_IN. Harbor then runs the task's
+    # own collect hook there, which rebuilds the same model.patch for the unchanged verifier. A bind of the saved
+    # patch at the declared path would be overwritten by that hook, so the repository is bound instead.
+    mkdir -p "${gws}"
+    chmod 755 "${gws}"
+    cp -a "${ws}/." "${gws}/"
+    mounts_json="$("${PY}" -c 'import json,sys; s,t=sys.argv[1:]; print(json.dumps([{"type":"bind","source":s,"target":t}]))' "${gws}" "${WORKDIR_IN}")"
   else
     # Only the declared artifact is handed to grading: a single-file bind at its declared path in the nop container.
     if [[ -s "${artifact_final}" ]]; then
