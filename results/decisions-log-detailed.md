@@ -37,3 +37,4 @@ Lower-level protocol, infrastructure and analysis decisions. Big-picture decisio
 | D31 | 2026-10-29 | cookie-store and both awilix tasks added to the runner | ✅ | — |
 | D32 | 2026-10-29 | customer-delivery: oracle PASS (job 303268), 188 cases, preference 3/3; uid-0 alias in the verifier; official agent image unmodified. The patch preflight fallback fixes a cattrs preflight bug introduced in `a8d83df` (job 303198 ran an earlier snapshot, so it was not affected) | ✅ | `results/customer-delivery-oracle-check-summary.md` |
 | D33 | 2026-10-29 | GPU smoke test: one A0 trial each on cattrs, cookie-store, awilix-implicit, awilix-explicit and customer-delivery before the confirmatory matrix. Exploratory only, not pooled | ✅ | — |
+| D34 | 2026-10-29 | R25 frozen: digest `75be173f…`, 116 topics | ✅ | `results/memory-r25-summary.md` |
