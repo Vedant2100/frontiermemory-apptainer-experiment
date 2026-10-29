@@ -381,3 +381,4 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 - Ladder so far: v2 0/3 (1.0 cases) < v4 1/3 (4.3) < v3 6/6 (non-compliant). No-memory arms 0/12 overall.
 - Report: `results/word2vec-openhands/ab-v4-results.md`.
 - 2026-10-28: memory v5 (whole corpus, official instruction) frozen; digest 94d59c2c…; official check ok; index lists 106/324 topics (truncated). Main A/B submitted: Word2Vec 303008, DAPT 303009. See results/memory-v5-summary.md.
+- 2026-10-29: main A/B v5 vs no memory (Codex + local Qwen). Word2Vec 303008: A 0/3, B 3/3 strict. DAPT 303009: strict 0/3 both; cases A 22/18/16, B 31/31/29 of 37. All 12 trials valid. See results/ab-v5-results.md.

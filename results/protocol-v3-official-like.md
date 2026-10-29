@@ -11,7 +11,7 @@ Goal: a memory vs no-memory result that follows the FrontierMemory v1.0 rules (`
 | One memory for all target tasks | Memory v5 is generated once and frozen, then used on every evaluated task |
 | No web search during generation | Local Ollama only, inside a Slurm job |
 | Memory format | `MEMORY.md` present, UTF-8, no dotfiles or symlinks, at most 8 MiB (checked) |
-| Task agent is a fixed harness, memory loaded natively | Codex CLI. B gets the memory as Codex's native global `AGENTS.md`; A has none |
+| Task agent is a fixed harness, memory loaded natively | Codex CLI. B gets the memory in `$CODEX_HOME/memories/` as in the official `codex.py`; A has none. (Earlier Codex `gpt-reserve` runs used global `AGENTS.md` instead; that is a deviation) |
 | 3 attempts per task, same model and effort for A and B | k=3 per arm per task; A/B interleaved within one job |
 | Original tasks and verifiers; infra failures rerun, not scored | Unchanged sources, fresh staged copies, oracle-validated pipeline |
 
@@ -30,8 +30,8 @@ All rungs are scored with the same harness on Word2Vec.
 |---|---|---|---|
 | none | — | — | control |
 | v2 | 14 family trajectories, per-step truncated | custom | done: 0/3 (OpenHands), 0/3 (Codex gpt-reserve) |
-| v4 | 14 family trajectories, untruncated | official instruction verbatim | in progress |
-| v5 | whole corpus (674) | official instruction verbatim | planned (protocol-faithful) |
+| v4 | 14 family trajectories, untruncated | official instruction verbatim | done: 1/3 (OpenHands) |
+| v5 | whole corpus (674) | official instruction verbatim | done: 3/3 Word2Vec; DAPT 0/3 strict, cases 18.7 → 30.3 / 37 (Codex, `results/ab-v5-results.md`) |
 | v3 | 14 family trajectories, untruncated | custom "reference recipe" from PASS runs | done: 3/3. **Non-compliant upper bound** (reconstructs prior final artifact) |
 
 Primary result: v5 vs no memory, strict pass@3 per task.

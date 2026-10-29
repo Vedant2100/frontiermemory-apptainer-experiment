@@ -43,4 +43,4 @@ Main A/B: v5 vs no memory, Codex CLI + local Qwen3.8 through the official `$CODE
 - Word2Vec: job 303008
 - DAPT: job 303009
 
-Results will be added to this file.
+Results: `results/ab-v5-results.md`. Word2Vec: A 0/3, B 3/3 strict. DAPT: strict 0/3 in both arms, mean cases passed 18.7 → 30.3 of 37.
