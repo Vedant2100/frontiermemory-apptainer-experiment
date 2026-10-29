@@ -135,3 +135,28 @@ A1 prescribed dropping G and GR. **This amendment replaces that outcome with a d
 - There are no revisions. If the gate fails, G and GR are dropped for good.
 
 **GR:** the same number of units removed uniformly at random (seed 2027) from all non-heading units, as before.
+
+### A3 (2026-10-29): governance arms dropped; matrix and audit updated. Before any confirmatory trial; no task outcomes seen
+
+**Governor result.** The A2 grounding rule failed its gate on the A1 validation set: sensitivity 0.62, specificity 0.50. Per A2, **arms G and GR are dropped for good. There will be no further governor amendments.**
+
+**Confirmatory arms:** A0, R25, M3.
+- **Trial count:** with the trial budget unchanged, **k = 5 per arm per task**.
+- **Order:** within each task job, 5 rounds of a Latin rotation over (A0, R25, M3).
+- **Primary contrasts:**
+  - H0: M3 > A0.
+  - H1: M3 > R25.
+  - Both are Holm-corrected, using the analysis in §4.
+
+**The memory-quality audit (§5) is extended.** It is measurement only and does not feed back into any arm. It runs on M2, M3 and R25:
+- the A2 grounding rate for all technical units, split into units with cited evidence and units with BM25 evidence;
+- R-artifact counts;
+- the share of units with resolvable citations.
+
+The validation results for the A1 judges and the A2 rule are reported as findings about verifying lessons automatically.
+
+**Scope-leakage analysis.** This is the timeline item #21, now made concrete:
+- For each task and memory arm, compare against A0.
+- Tag a trial as "memory consulted" when the trace shows the agent opening memory files, and record which topic files it opened.
+- Classify each opened file as same-family or other-family. The classification uses only the topic file name and the task's *name*: a deterministic token overlap of at least 1 shared content word. It never uses task content.
+- Report how often harmful trials involve other-family topics. This is descriptive only.

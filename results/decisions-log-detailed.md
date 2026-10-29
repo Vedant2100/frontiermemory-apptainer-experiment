@@ -31,3 +31,5 @@ Lower-level protocol, infrastructure and analysis decisions. Big-picture decisio
 | D25 | 2026-10-29 | D24 outcome: oracle check 303229 PASS (functional 115/115, regression 1285/1285, preference gates fail by design). cookie-store re-included as a candidate task with verifier image v3 | ✅ | `results/cookie-store-oracle-check-summary.md` |
 | D26 | 2026-10-29 | A1 validation: gemma3 sensitivity 0.16 / specificity 0.85; qwen3.8 0.21 / 0.98. Both fail; no judge chosen | ✅ | Jobs 303219, 303220 |
 | D27 | 2026-10-29 | Prereg A2: grounding governor (token-in-evidence), same validation sets, no revisions | ✅ | `results/preregistration-v1.md` |
+| D28 | 2026-10-29 | A2 validation: sensitivity 0.62, specificity 0.50 (fail). 50 of 100 original cited lessons lack their own identifiers in the cited steps; truncation explains only 9 of them | ✅ | `results/governor-run-a2-validate/` |
+| D29 | 2026-10-29 | Prereg A3: arms A0/R25/M3, k=5, Latin order of 5 rounds; extended audit; deterministic scope-leakage tagging from topic file names and task names only | ✅ | `results/preregistration-v1.md` |
