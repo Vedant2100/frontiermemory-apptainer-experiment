@@ -207,3 +207,11 @@ What each arm shows the model, by count of topic entries:
    - "Content word" is frozen as: lowercase tokens split on non-alphanumerics, length > 2, excluding the stop list in `scripts/memory_exposure.py`.
    - Generic words ("pipeline", "learning", "workflow") are *not* stop words under the frozen rule, so same-family counts are upper bounds. This is reported as a limitation.
 4. **Interpretation.** M3 was meant to add a complete index. Under this mechanism the index is mostly invisible. M3 is kept as frozen and reported as "a longer summary whose window differs from v5". It is not reported as "a full index".
+
+## Amendment A5 (2026-10-29): conservative case count for patch tasks. Analysis only, added before any confirmatory result
+
+- In patch tasks, the official verifier also collects any tests the agent adds. Example: smoke job 303274 collected 202 tests, against 184 in the oracle check.
+- The recorded secondary metric `cases_passed = min(passed, cases_total)` can therefore hide failures among the original cases.
+- Alongside it, we also report a lower bound computed from recorded counts: `cases_passed_lb = max(0, passed − max(0, collected − cases_total))`.
+- Conclusions from the secondary metric require both values to agree in direction.
+- The primary metric (strict reward from the official verifier) is unchanged.
