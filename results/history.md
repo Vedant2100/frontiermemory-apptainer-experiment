@@ -373,3 +373,10 @@ Date range: 2026-10-24–25 (cluster logs use both local time and UTC)
 ## 2026-10-28 — Memory v3 replication (job 302125)
 
 - Same setup as 302098. A 0/3, B 3/3 (6/6 cases each). Combined A 0/6 vs B 6/6, Fisher p = 0.0022. Still a non-compliant upper bound (v3 reconstructs prior PASS artifacts).
+
+## 2026-10-28 — Memory v4 (official instruction) and A/B (jobs 302127, 302175)
+
+- Memory v4 was generated locally from the 14 word2vec-family trajectories, with the official dream `instruction.md` verbatim as the map/reduce prompt. 4,137 bytes; frozen sha `b2566a31…`. Audit: misreads one PASS run and calls the PASS interface a failure mode, but still names its exact signature.
+- A/B 302175 (same OpenHands harness): A 0/3 strict (0/3 collected); B 1/3 strict, 3/3 collected, cases 2/5/6 of 6.
+- Ladder so far: v2 0/3 (1.0 cases) < v4 1/3 (4.3) < v3 6/6 (non-compliant). No-memory arms 0/12 overall.
+- Report: `results/word2vec-openhands/ab-v4-results.md`.
