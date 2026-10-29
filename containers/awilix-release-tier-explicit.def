@@ -1,0 +1,12 @@
+# Explicit awilix task (letta-ai/awilix-release-tier-explicit): the agent image is the official task image named in
+# its task.toml, used unmodified. The base commit is 82ac179c1de4c216c4e333093044fac643303f0c and node_modules comes
+# from the image itself (no npm registry access on compute nodes).
+Bootstrap: docker
+From: public.ecr.aws/d3j8x8q7/swe-bench-202605@sha256:c574abfc7049c710e7ab94b53829e21ed3a89544a2e04389fe7f4b01e4c6002e
+
+%post
+    set -eu
+    test "$(git -C /app rev-parse HEAD)" = "82ac179c1de4c216c4e333093044fac643303f0c"
+    test -d /app/node_modules
+    node -v
+    npm -v

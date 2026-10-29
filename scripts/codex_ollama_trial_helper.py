@@ -18,6 +18,7 @@ Subcommands:
   verify-memory  check one memory folder against its expected official digest (counts and digest only)
   balanced-order print the preregistered balanced TRIAL_ORDER (Latin rotation over the arms, 3 rounds)
   aggregate      trials-summary.json for one job: trial records plus per-arm groups
+  add-verifier-env  add the task's spec verifier_env entries to a staged task.toml (grading copy only)
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -43,8 +45,28 @@ TASK_SPECS = {
     #   cases_total is their sum (cattrs: 70 + 7, matched by the oracle check).
     "build-word2vec-pipeline": {"cases_total": 6, "workdir": "/workspace"},
     "dapt-intrusion-detection-workflow-learning": {"cases_total": 37, "workdir": "/root"},
+    # awilix (release-tier implicit and explicit): official test.sh runs Jest twice (base = regression, then new =
+    #   functional) and prints "Tests: ..." summary lines between "--- Step 3" and "--- Step 4" markers. Cases are
+    #   passed + failed per section; skipped tests are not cases (1 functional skip, by design, in the oracle run).
+    #   cases_total 184 = regression 161 + functional 23 (oracle run: 161/161 and 23/23 passing, 1 skipped).
+    #   The declared artifact is /logs/artifacts (a directory); the collect step writes model.patch inside it.
+    "awilix-release-tier-implicit": {"cases_total": 184, "workdir": "/app", "artifact_mode": "patch",
+                                     "artifact_path": "/logs/artifacts", "verifier_format": "jest-sections"},
+    "awilix-release-tier-explicit": {"cases_total": 184, "workdir": "/app", "artifact_mode": "patch",
+                                     "artifact_path": "/logs/artifacts", "verifier_format": "jest-sections"},
     "cattrs-compositional-changelog": {"cases_total": 77, "workdir": "/app", "artifact_mode": "patch",
                                        "artifact_path": "/logs/artifacts/model.patch"},
+    # cookie-store: test.sh writes reward.txt (strict 0/1), functional-reward.txt, and two pytest summary lines in
+    #   verifier/test-stdout.txt (regression first, then functional) plus [user-preference-gate] lines. cases_total
+    #   is regression (1285 = passed + errors) + functional (115), as in the oracle check (303229: 1400).
+    #   verifier_env is the [verifier.env] addition of the oracle check (safe.directory for git, USER/LOGNAME root).
+    #   The verifier SIF is -v3 (agent uid-0 alias, see its def).
+    "cookie-store-compositional-changelog": {
+        "cases_total": 1400, "workdir": "/app", "artifact_mode": "patch",
+        "artifact_path": "/logs/artifacts/model.patch", "verifier_format": "cookie-store-text",
+        "verifier_env": {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory",
+                         "GIT_CONFIG_VALUE_0": "*", "USER": "root", "LOGNAME": "root"},
+    },
 }
 PATCH_HEADER_ARTIFACT_LINE = (
     "The official task metadata declares this file as a required output: `{path}`. It is produced by the task's "
@@ -84,10 +106,123 @@ def parse_reward_json(path: Path) -> dict:
             "errors": 0, "skipped": 0, "collection_error": collected == 0, "parse_note": None}
 
 
+# Cookie-store verifier output (see the TASK_SPECS comment). Summary lines: "N passed, M skipped in 12.3s".
+COOKIE_SUMMARY_RE = re.compile(r"^=*\s*((?:\d+ [a-z]+,? ?)+) in [0-9.]+s")
+COOKIE_COUNT_RE = re.compile(r"(\d+) ([a-z]+)")
+COOKIE_GATE_RE = re.compile(r"^\[user-preference-gate\] (PASS|FAIL)\b", re.M)
+
+
+def _pytest_run_counts(line_counts: dict) -> dict:
+    return {"passed": line_counts.get("passed", 0), "failed": line_counts.get("failed", 0),
+            "errors": line_counts.get("error", 0) + line_counts.get("errors", 0),
+            "skipped": line_counts.get("skipped", 0)}
+
+
+def parse_cookie_store(vdir: Path) -> dict:
+    """Counts from a cookie-store verifier directory (written by the official test.sh).
+
+    Regression = the first pytest summary line (base tests), functional = the second (new tests), as in the
+    oracle check. Gate counts come from the [user-preference-gate] lines. Counts only; no test names.
+    """
+    text = read_text_or_empty(vdir / "test-stdout.txt")
+    runs = []
+    for line in text.splitlines():
+        m = COOKIE_SUMMARY_RE.match(line.strip())
+        if m:
+            runs.append({word: int(n) for n, word in COOKIE_COUNT_RE.findall(m.group(1))})
+    reg = _pytest_run_counts(runs[0]) if len(runs) > 0 else {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+    fun = _pytest_run_counts(runs[1]) if len(runs) > 1 else {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+    total = {k: reg[k] + fun[k] for k in reg}
+    collected = total["passed"] + total["failed"] + total["errors"]
+    notes = [] if len(runs) == 2 else [f"expected 2 pytest summary lines, found {len(runs)}"]
+    gates = COOKIE_GATE_RE.findall(text)
+    score = read_text_or_empty(vdir / "user-preference-score.txt").strip() or None
+    functional_reward = read_text_or_empty(vdir / "functional-reward.txt").strip() or None
+    return {
+        "output_present": (vdir / "test-stdout.txt").is_file(),
+        "collected": collected, "passed": total["passed"], "failed": total["failed"], "errors": total["errors"],
+        "skipped": total["skipped"], "collection_error": collected == 0 and total["errors"] > 0,
+        "parse_note": "; ".join(notes) or None,
+        "regression": reg, "functional": fun,
+        "regression_collected": reg["passed"] + reg["failed"] + reg["errors"],
+        "functional_collected": fun["passed"] + fun["failed"] + fun["errors"],
+        "functional_reward": functional_reward,
+        "preference_gates_pass": gates.count("PASS"), "preference_gates_fail": gates.count("FAIL"),
+        "preference_score": score,
+        "user_preference_json_present": (vdir / "user-preference.json").is_file(),
+    }
+
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+JEST_TESTS_LINE = re.compile(r"^\s*Tests:\s+(.*)$", re.M)
+JEST_COUNT = re.compile(r"(\d+) (passed|failed|skipped|todo|pending|total)")
+VERIFIER_RESULT_LINE = re.compile(r"^\[verifier\] functional=(\d+) preference=(\d+) strict=(\d+)\s*$", re.M)
+
+
+def _jest_section(text: str) -> dict:
+    """Last Jest "Tests:" summary line of one section: {summary_lines, passed, failed, skipped, total}."""
+    lines = JEST_TESTS_LINE.findall(text)
+    out = {"summary_lines": len(lines), "passed": 0, "failed": 0, "skipped": 0, "total": 0}
+    if lines:
+        for number, kind in JEST_COUNT.findall(lines[-1]):
+            out["skipped" if kind in ("todo", "pending") else kind] += int(number)
+    return out
+
+
+def parse_jest_sections(vdir: Path) -> dict:
+    """Counts from an awilix verifier directory (official test.sh, Jest). Counts only; no test names."""
+    text = ANSI_ESCAPE.sub("", read_text_or_empty(vdir / "test-stdout.txt"))
+    head, sep, tail = text.partition("--- Step 4: Running new tests ---")
+    regression_text = head.partition("--- Step 3: Running baseline tests ---")[2] if sep else head
+    reg = _jest_section(regression_text)
+    fun = _jest_section(tail if sep else "")
+    results = VERIFIER_RESULT_LINE.findall(text)
+    preference = int(results[-1][1]) if results else None
+    reg_cases = reg["passed"] + reg["failed"]
+    fun_cases = fun["passed"] + fun["failed"]
+    notes = [] if results else ["no [verifier] result line"]
+    return {
+        "output_present": (vdir / "test-stdout.txt").is_file(),
+        "collected": reg_cases + fun_cases, "passed": reg["passed"] + fun["passed"],
+        "failed": reg["failed"] + fun["failed"], "errors": 0,
+        "skipped": reg["skipped"] + fun["skipped"],
+        "collection_error": (reg_cases + fun_cases) == 0,
+        "parse_note": "; ".join(notes) or None,
+        "regression": reg, "functional": fun,
+        "regression_collected": reg_cases, "functional_collected": fun_cases,
+        "functional_reward": read_text_or_empty(vdir / "functional-reward.txt").strip() or None,
+        "preference_pass": preference,
+        "preference_json_present": (vdir / "user-preference-ctrf.json").is_file(),
+    }
+
+
 def spec_for(task: str) -> dict:
     if task not in TASK_SPECS:
         raise SystemExit(f"unknown TASK {task!r}")
     return TASK_SPECS[task]
+
+
+# ------------------------------------------------------------ add-verifier-env
+def add_verifier_env_lines(text: str, env: dict) -> str:
+    """Insert the [verifier.env] entries right after the single [verifier.env] header (same text as the oracle check)."""
+    header = "[verifier.env]\n"
+    if text.count(header) != 1:
+        raise SystemExit("expected one [verifier.env] table")
+    entries = "".join(f"{key} = {json.dumps(value)}\n" for key, value in env.items())
+    return text.replace(header, header + entries, 1)
+
+
+def cmd_add_verifier_env(args: argparse.Namespace) -> int:
+    spec = spec_for(args.task)
+    env = spec.get("verifier_env")
+    if not env:
+        print("no verifier_env for this task")
+        return 0
+    path = Path(args.task_toml)
+    path.write_text(add_verifier_env_lines(path.read_text(encoding="utf-8"), env), encoding="utf-8")
+    tomllib.loads(path.read_text(encoding="utf-8"))
+    print(json.dumps({"verifier_env_keys": sorted(env)}))
+    return 0
 
 
 # -------------------------------------------------------------------- task-meta
@@ -203,7 +338,15 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
     artifact_ok = artifact_exists and (not args.artifact_start_sha or artifact_sha != args.artifact_start_sha)
 
     patch_mode = spec.get("artifact_mode") == "patch"
-    if patch_mode:
+    cookie_mode = spec.get("verifier_format") == "cookie-store-text"
+    jest_mode = spec.get("verifier_format") == "jest-sections"
+    if cookie_mode:
+        verifier = parse_cookie_store(harbor_trial / "verifier") if harbor_trial else \
+            parse_cookie_store(Path("/nonexistent"))
+    elif jest_mode:
+        verifier = parse_jest_sections(harbor_trial / "verifier") if harbor_trial else \
+            parse_jest_sections(Path("/nonexistent"))
+    elif patch_mode:
         verifier = parse_reward_json(harbor_trial / "verifier" / "reward.json") if harbor_trial else \
             parse_reward_json(Path("/nonexistent"))
     else:
@@ -251,9 +394,46 @@ def cmd_trial_record(args: argparse.Namespace) -> int:
             "artifact_mode": "patch",
             "harbor_collected_patch_sha256": harbor_sha,
             "collect_exit_code": int(read_text_or_empty(tdir / "collect-exit.txt").strip() or -1),
-            "verifier_reward_json_present": verifier["output_present"],
+            "verifier_reward_json_present": verifier["output_present"] if not (cookie_mode or jest_mode) else None,
             "cases_total_matches_verifier": verifier["collected"] == cases_total,
         }
+        if jest_mode:
+            patch_extra.update({
+                "verifier_format": "jest-sections",
+                "functional_reward": verifier["functional_reward"],
+                "regression_total": verifier["regression_collected"],
+                "regression_passed": verifier["regression"]["passed"],
+                "regression_failed": verifier["regression"]["failed"],
+                "regression_skipped": verifier["regression"]["skipped"],
+                "functional_total": verifier["functional_collected"],
+                "functional_passed": verifier["functional"]["passed"],
+                "functional_failed": verifier["functional"]["failed"],
+                "functional_skipped": verifier["functional"]["skipped"],
+                "preference_pass": verifier["preference_pass"],
+                "user_preference_json_present": verifier["preference_json_present"],
+                "verifier_parse_note": verifier["parse_note"],
+            })
+        if cookie_mode:
+            patch_extra.update({
+                "verifier_format": "cookie-store-text",
+                "strict_reward_file": (harbor_trial / "verifier" / "reward.txt").is_file() if harbor_trial else False,
+                "functional_reward": verifier["functional_reward"],
+                "regression_total": verifier["regression_collected"],
+                "regression_passed": verifier["regression"]["passed"],
+                "regression_failed": verifier["regression"]["failed"],
+                "regression_errors": verifier["regression"]["errors"],
+                "regression_skipped": verifier["regression"]["skipped"],
+                "functional_total": verifier["functional_collected"],
+                "functional_passed": verifier["functional"]["passed"],
+                "functional_failed": verifier["functional"]["failed"],
+                "functional_errors": verifier["functional"]["errors"],
+                "functional_skipped": verifier["functional"]["skipped"],
+                "preference_gates_pass": verifier["preference_gates_pass"],
+                "preference_gates_fail": verifier["preference_gates_fail"],
+                "preference_score": verifier["preference_score"],
+                "user_preference_json_present": verifier["user_preference_json_present"],
+                "verifier_parse_note": verifier["parse_note"],
+            })
     valid = category != "INVALID_INFRA"
     cases_passed = strict_reward = None
     if valid:
@@ -462,6 +642,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--arms", default=",".join(PREREG_ARMS))
     p.add_argument("--rounds", type=int, default=PREREG_ROUNDS)
     p.set_defaults(func=cmd_balanced_order)
+
+    p = sub.add_parser("add-verifier-env")
+    p.add_argument("--task", required=True)
+    p.add_argument("--task-toml", required=True)
+    p.set_defaults(func=cmd_add_verifier_env)
 
     p = sub.add_parser("aggregate")
     p.add_argument("--run-dir", required=True)

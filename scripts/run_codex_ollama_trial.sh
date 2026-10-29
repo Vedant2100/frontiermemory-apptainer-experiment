@@ -4,7 +4,9 @@
 # TASK selects the task: build-word2vec-pipeline (workspace /workspace, 6 cases),
 # dapt-intrusion-detection-workflow-learning (working dir /root, artifact /root/network_stats.csv, 37 cases), or
 # cattrs-compositional-changelog (patch task: repo /app, declared artifact /logs/artifacts/model.patch from the
-# task's [[verifier.collect]] command, 77 cases). For the patch task the runner runs that collect command on the
+# task's [[verifier.collect]] command, 77 cases), or cookie-store-compositional-changelog (same patch contract,
+# 1400 cases: 1285 regression + 115 functional, graded with the -v3 verifier SIF and the oracle check's
+# [verifier.env] additions). For the patch task the runner runs that collect command on the
 # agent's repo after Codex finishes, saves model.patch in the trial directory, and grades it through Harbor.
 # scripts/run_codex_ollama_word2vec_trial.sh is the earlier word2vec-only runner and is left unchanged.
 #
@@ -25,7 +27,8 @@
 # web search off (-c web_search=disabled), and --enable unified_exec, as Harbor's Codex agent does.
 #
 # Env:
-#   TASK            build-word2vec-pipeline (default) or dapt-intrusion-detection-workflow-learning.
+#   TASK            build-word2vec-pipeline (default), dapt-intrusion-detection-workflow-learning,
+#                   cattrs-compositional-changelog, or cookie-store-compositional-changelog.
 #   TRIAL_ORDER     space-separated arm tokens (default: A). A0 or A = no memory (condition A).
 #                   B = legacy single memory arm: FROZEN_MEMORY_DIR + EXPECTED_MEMORY_DIGEST (condition B).
 #                   Any other token must be a NAME from MEMORY_ARMS (condition B).
@@ -78,20 +81,38 @@ case "${TASK}" in
     VERIFIER_SIF="${REPO}/containers/frontier-memory-cattrs-verifier.sif"
     RUN_DIR="${REPO}/results/cattrs-codex-ollama/job-${JOB_ID}"
     ;;
-  *) echo "TASK must be build-word2vec-pipeline, dapt-intrusion-detection-workflow-learning, or cattrs-compositional-changelog: ${TASK}" >&2; exit 2 ;;
+  cookie-store-compositional-changelog)
+    AGENT_SIF="${REPO}/containers/frontier-memory-cookie-store.sif"
+    VERIFIER_SIF="${REPO}/containers/frontier-memory-cookie-store-verifier-v3.sif"
+    RUN_DIR="${REPO}/results/cookie-store-codex-ollama/job-${JOB_ID}"
+    ;;
+  awilix-release-tier-implicit)
+    AGENT_SIF="${REPO}/containers/awilix-release-tier-implicit-v2.sif"
+    VERIFIER_SIF="${REPO}/containers/awilix-release-tier-implicit-verifier-v2.sif"
+    RUN_DIR="${REPO}/results/awilix-release-tier-implicit-codex-ollama/job-${JOB_ID}"
+    ;;
+  awilix-release-tier-explicit)
+    AGENT_SIF="${REPO}/containers/awilix-release-tier-explicit.sif"
+    VERIFIER_SIF="${REPO}/containers/awilix-release-tier-explicit-verifier.sif"
+    RUN_DIR="${REPO}/results/awilix-release-tier-explicit-codex-ollama/job-${JOB_ID}"
+    ;;
+  *) echo "TASK must be build-word2vec-pipeline, dapt-intrusion-detection-workflow-learning, cattrs-compositional-changelog, cookie-store-compositional-changelog, awilix-release-tier-implicit, or awilix-release-tier-explicit: ${TASK}" >&2; exit 2 ;;
 esac
-# Working directory inside the agent container: /workspace (word2vec), /root (DAPT), or /app (cattrs repo).
+# Working directory inside the agent container: /workspace (word2vec), /root (DAPT), or /app (patch repos).
 case "${TASK}" in
   build-word2vec-pipeline) WORKDIR_IN=/workspace ;;
-  cattrs-compositional-changelog) WORKDIR_IN=/app ;;
+  cattrs-compositional-changelog|cookie-store-compositional-changelog|awilix-release-tier-implicit|awilix-release-tier-explicit) WORKDIR_IN=/app ;;
   *) WORKDIR_IN=/root ;;
 esac
 IS_W2V=0
 [[ "${TASK}" == build-word2vec-pipeline ]] && IS_W2V=1
 # Patch task: the agent edits a repository copy (populated from the image's /app, like DAPT's /root), and the
 # declared artifact is the patch that the task's collect command produces from that repository.
+IS_AWILIX=0
+[[ "${TASK}" == awilix-release-tier-implicit || "${TASK}" == awilix-release-tier-explicit ]] && IS_AWILIX=1
 IS_PATCH=0
-[[ "${TASK}" == cattrs-compositional-changelog ]] && IS_PATCH=1
+[[ "${TASK}" == cattrs-compositional-changelog || "${TASK}" == cookie-store-compositional-changelog ]] && IS_PATCH=1
+[[ "${IS_AWILIX}" == 1 ]] && IS_PATCH=1
 IS_DAPT=0
 [[ "${TASK}" == dapt-intrusion-detection-workflow-learning ]] && IS_DAPT=1
 # Image directory that a per-trial working directory is copied from (same as WORKDIR_IN for file tasks).
@@ -290,9 +311,20 @@ if [[ "${IS_PATCH}" == 1 ]]; then
     echo "Verifier SIF test files differ from the pinned task source" >&2; exit 5
   fi
   BASE_COMMIT="$("${PY}" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["metadata"]["base_commit_hash"])' "${SOURCE_TASK}/task.toml")"
-  apptainer exec --containall --cleanenv --no-home --pwd "${IMAGE_WORKDIR}" "${AGENT_SIF}" /bin/bash -c \
-    'git -C /app rev-parse HEAD; git -C /app status --porcelain | wc -l' >"${RUN_DIR}/preflight/image-repo-head.txt"
-  grep -qx "${BASE_COMMIT}" "${RUN_DIR}/preflight/image-repo-head.txt" || { echo "image /app HEAD is not the base commit" >&2; exit 5; }
+  COLLECT_REF="$(printf '%s\n' "${COLLECT_COMMAND}" | sed -n 's/.*git reset --soft \([^ ]*\) .*/\1/p')"
+  # Collect steps that reset to a ref (cookie-store, awilix) name it here; cattrs diffs against the base commit.
+  [[ -n "${COLLECT_REF}" ]] || COLLECT_REF="${BASE_COMMIT}"
+  # Probe: cookie-store needs httpx in the image; awilix needs node, npm and node_modules (no registry at grading).
+  case "${TASK}" in
+    cookie-store-compositional-changelog) PROBE="python3 -c 'import httpx' && echo httpx-ok" ;;
+    awilix-release-tier-*) PROBE="test -d /app/node_modules && node -v && npm -v" ;;
+    *) PROBE="true" ;;
+  esac
+  PREFLIGHT_CMD="git -C /app rev-parse HEAD && git -C /app rev-parse --verify '${COLLECT_REF}^{commit}' && git -C /app merge-base --is-ancestor '${BASE_COMMIT}' HEAD && git -C /app status --porcelain | wc -l && ${PROBE}"
+  apptainer exec --containall --cleanenv --no-home --pwd "${IMAGE_WORKDIR}" "${AGENT_SIF}" /bin/bash -c "${PREFLIGHT_CMD}" \
+    >"${RUN_DIR}/preflight/image-repo-head.txt" || { echo "image /app preflight failed (see ${RUN_DIR}/preflight/image-repo-head.txt)" >&2; exit 5; }
+  [[ "$(sed -n 1p "${RUN_DIR}/preflight/image-repo-head.txt")" == "$(sed -n 2p "${RUN_DIR}/preflight/image-repo-head.txt")" ]] \
+    || { echo "image /app HEAD is not the collect reset commit" >&2; exit 5; }
   # Agent image manifest of the repository (the template for every trial's populated /app).
   apptainer exec --containall --cleanenv --no-home --pwd "${IMAGE_WORKDIR}" "${AGENT_SIF}" /bin/bash -c \
     'find . -type f -print0 | sort -z | xargs -0 sha256sum' >"${RUN_DIR}/preflight/image-root-sha256.txt"
@@ -633,6 +665,8 @@ run_trial() {
   printf '%s\n' "${mounts_json}" >"${gdir}/environment-mounts.json"
   "${PY}" scripts/stage_word2vec_task_for_apptainer.py --source "${SOURCE_TASK}" --output "${gtask}" \
     --agent-image "${AGENT_SIF}" --verifier-image "${VERIFIER_SIF}" >"${gdir}/task-staging.json"
+  # Task-specific [verifier.env] additions for the grading copy (cookie-store: safe.directory and USER/LOGNAME root).
+  "${PY}" "${TASK_HELPER}" add-verifier-env --task "${TASK}" --task-toml "${gtask}/task.toml" >"${gdir}/verifier-env.txt"
   cp "${RUN_DIR}/preflight/task-meta.json" "${gdir}/staged-task-preflight.json"
   set +e
   APPTAINER_BINDPATH="${HARBOR_SHARED_BINDPATH}" SINGULARITY_BINDPATH="${HARBOR_SHARED_BINDPATH}" \

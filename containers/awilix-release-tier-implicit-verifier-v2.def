@@ -1,0 +1,30 @@
+# Verifier image for awilix-release-tier-implicit (Harbor separate verifier). Base: the official task image (same digest as
+# the task's agent image; it has /app at 82ac179 and node_modules). Tests are the official tests/ directory.
+# test.sh and original-test.sh switch to the agent user with runuser, so `agent` is aliased to uid/gid 0, the same
+# cluster workaround as containers/frontier-memory-cookie-store-verifier-v3.def (no subuid range for the account).
+# Test files are unchanged.
+Bootstrap: docker
+From: public.ecr.aws/d3j8x8q7/swe-bench-202605@sha256:c574abfc7049c710e7ab94b53829e21ed3a89544a2e04389fe7f4b01e4c6002e
+
+%files
+    /home/csgrad/vbork001/frontiermemory-experiment-20261024/data/tasks/frontier-memory/awilix-release-tier-implicit/tests /tests
+
+%post
+    set -eu
+    test -f /tests/test.sh
+    test -f /tests/original-test.sh
+    chmod 755 /tests
+    chmod +x /tests/test.sh /tests/original-test.sh
+    if ! command -v runuser >/dev/null 2>&1; then \
+      if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends passwd util-linux && rm -rf /var/lib/apt/lists/*; \
+      else echo 'unsupported verifier base image: runuser is required' >&2; exit 1; fi; \
+    fi
+    test -x /usr/sbin/runuser || test -x "$(command -v runuser)"
+    sed -i '/^agent:/d' /etc/passwd /etc/group
+    printf '%s\n' 'agent:x:0:0:Harbor agent (aliased to uid 0, see def):/home/agent:/bin/sh' >> /etc/passwd
+    printf '%s\n' 'agent:x:0:' >> /etc/group
+    mkdir -p /home/agent
+    mkdir -p /logs/verifier
+    chmod 700 /logs/verifier
+    test -d /app/node_modules
+    test "$(git -C /app rev-parse HEAD)" = "82ac179c1de4c216c4e333093044fac643303f0c"

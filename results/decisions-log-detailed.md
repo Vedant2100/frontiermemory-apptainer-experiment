@@ -33,3 +33,5 @@ Lower-level protocol, infrastructure and analysis decisions. Big-picture decisio
 | D27 | 2026-10-29 | Prereg A2: grounding governor (token-in-evidence), same validation sets, no revisions | ✅ | `results/preregistration-v1.md` |
 | D28 | 2026-10-29 | A2 validation: sensitivity 0.62, specificity 0.50 (fail). 50 of 100 original cited lessons lack their own identifiers in the cited steps; truncation explains only 9 of them | ✅ | `results/governor-run-a2-validate/` |
 | D29 | 2026-10-29 | Prereg A3: arms A0/R25/M3, k=5, Latin order of 5 rounds; extended audit; deterministic scope-leakage tagging from topic file names and task names only | ✅ | `results/preregistration-v1.md` |
+| D30 | 2026-10-29 | awilix implicit and explicit: oracle PASS (jobs 303255, 303256), 184 cases. Changes: uid-0 agent alias in the verifiers; implicit agent image rebuilt on the official digest (equivalence checked); the nop check allows a patch that touches only package-lock.json | ✅ | `results/awilix-release-tier-*-oracle-check-summary.md` |
+| D31 | 2026-10-29 | cookie-store and both awilix tasks added to the runner | ✅ | — |

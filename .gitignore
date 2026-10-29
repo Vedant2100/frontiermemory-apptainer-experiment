@@ -19,6 +19,8 @@
 /results/word2vec-*/
 # Raw cattrs patch-task trials and oracle check: patches, verifier output, and solution-derived files.
 /results/cattrs-codex-ollama/
+/results/cookie-store-codex-ollama/
+/results/awilix-release-tier-*-codex-ollama/
 /results/cattrs-oracle-check-*/
 
 # Cluster-only environments, caches, model files, and generated task copies.
@@ -49,3 +51,4 @@ __pycache__/
 scripts/.runner-snapshot-*.sh
 results/governor-run-*/
 results/cookie-store-oracle-check-*/
+results/awilix-*-oracle-check-[0-9]*/

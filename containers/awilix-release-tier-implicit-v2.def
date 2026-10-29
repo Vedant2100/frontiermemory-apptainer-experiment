@@ -1,0 +1,25 @@
+# Implicit awilix task (letta-ai/awilix-release-tier-implicit), agent image rebuilt on the official task image
+# (swe-bench-202605 kh70..., the same digest the explicit task and the verifier use) instead of mars-base.
+# Adds the release-tier fixture commit and the frontier-memory-task-base tag, as the mars-base image does.
+# Dependencies come from the image's own node_modules (no npm install: no registry access on compute nodes).
+Bootstrap: docker
+From: public.ecr.aws/d3j8x8q7/swe-bench-202605@sha256:c574abfc7049c710e7ab94b53829e21ed3a89544a2e04389fe7f4b01e4c6002e
+
+%post
+    set -eu
+    cd /app
+    test "$(git rev-parse HEAD)" = "82ac179c1de4c216c4e333093044fac643303f0c"
+    test -d node_modules
+    mkdir -p .changes \
+        && printf 'internal_release_tier: 7\n' > .changes/awilix.yaml \
+        && git add .changes/awilix.yaml \
+        && GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' \
+           GIT_COMMITTER_DATE='2026-01-01T00:00:00Z' \
+           git -c user.name='Frontier Memory Fixture' \
+               -c user.email='fixture@frontier-memory.local' \
+               -c core.hooksPath=/dev/null \
+               commit -m 'Add release metadata fixture' \
+        && git tag -f frontier-memory-task-base
+    git rev-parse --verify refs/tags/frontier-memory-task-base
+    node -v
+    npm -v
