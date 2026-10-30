@@ -14,6 +14,22 @@ We run the official FrontierMemory v1.0 tasks with Codex CLI driving a local Qwe
 | **R25** | Memory built from a random 25% of the corpus (smaller) |
 | **M3** | Memory built from the whole corpus, with a complete topic index |
 
+## How the memory is built
+
+No person writes or edits the memory. A script builds it with the same local model the agent uses: Qwen3.8-27B through Ollama, on the cluster, with no web or paid APIs. Every model call receives the official FrontierMemory memory instruction, unchanged. The pipeline ([`scripts/generate_corpus_memory_v5.py`](scripts/generate_corpus_memory_v5.py)) has four steps:
+
+1. **Notes.** The model reads each past run in the corpus (674 runs in v1.0, both passes and failures) and writes a short note on what was tried and what worked or failed.
+2. **Grouping.** Notes on the same topic are grouped together, giving 324 groups.
+3. **Topic files.** For each group, the model writes one topic file of lessons, citing the past runs they came from.
+4. **Index.** The model writes `MEMORY.md`, a summary and index pointing to the topic files.
+
+The two memory conditions differ only in what goes in:
+
+- **M3** uses the whole corpus. A small script then appends a complete list of topics to `MEMORY.md`, because the model's own index ran out of length and listed only 106 of the 324 topics.
+- **R25** uses a random 25% of the runs, chosen with a fixed seed and stratified by pass/fail. It goes through the same steps and gets the same index fix.
+
+Both memories pass the benchmark's official format check and are frozen, identified by a hash, before any trial. Details: [memory v5](results/memory-v5-summary.md) and [R25](results/memory-r25-summary.md).
+
 Everything else is identical across conditions: task, model, prompt, time limit and grader. A plan fixed in advance ([preregistration](results/preregistration-v1.md)) sets the trial order and the analysis before any result is seen.
 
 ## Results so far
