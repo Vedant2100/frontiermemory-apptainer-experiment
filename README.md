@@ -1,56 +1,52 @@
-# FrontierMemory Apptainer exploratory experiment
+# Does agent-written memory actually help? A FrontierMemory study on local hardware
 
-Exploratory FrontierMemory coding experiments on a Slurm GPU cluster using Apptainer and local Ollama models. These are diagnostic runs, not leaderboard results.
+[FrontierMemory](https://frontiermemory.com/) asks whether a coding agent does better on new tasks when it can read a "memory" distilled from hundreds of earlier agent runs. The official leaderboard compares memory systems, but it never reports how agents do *without* memory. This repo measures exactly that: the same agent on the same tasks, with and without memory, using only free, local models on a university Slurm cluster.
 
-## Result
+## In one paragraph
 
-| Condition | Memory | Original verifier | Model calls / shell actions | Input / output tokens | Agent time | Whole trial |
-|---|---|---:|---:|---:|---:|---:|
-| A | None | **Fail (0.0)** | 50 / 49 | 196,352 / 962 | 78.9 s | 134.2 s |
-| B | Official-corpus-derived memory | **Fail (0.0)** | 50 / 49 | 311,123 / 1,164 | 51.3 s | 106.2 s |
+We run the official FrontierMemory v1.0 tasks with Codex CLI driving a local Qwen3.8-27B model, inside Apptainer containers instead of Docker. Memory goes in through Codex's own memory mechanism, built from the official corpus with the official instruction. Every task is checked first: the reference solution must pass our grading setup before we trust any score. Early runs gave one striking result, on a Word2Vec task: 0/3 trials passed without memory and 3/3 with it. A second task (DAPT) showed a gain that did not hold up when we re-ran it. We also found that a local model cannot reliably tell whether a memory "lesson" is correct: two LLM judges and a rule-based checker all failed validation, and about half the lessons that cite evidence are not supported by the steps they cite. We then preregistered a larger experiment: 7 tasks, 3 memory conditions, 5 trials each. Two tasks are done so far, and Word2Vec replicated cleanly (no memory 0/5, both memory versions 5/5). The remaining five are running now. The results go into a short paper (target: FORGE 2027, Nov 15), followed by a memory-system submission to the leaderboard.
 
-Both runs used the same local Qwen2.5-Coder 7B Q4 model, Mini-SWE-Agent 2.4.6, task image, task, verifier, and 50-call limit. B changed tool behavior: A mostly alternated between reading two source files, while B repeated a search for `initialize`. Neither solved the task. The memory increased prompt tokens without changing verifier outcome.
+## What we compare
 
-Full sanitized metrics are in [`results/paired-metrics.csv`](results/paired-metrics.csv), and the run summary is in [`results/experiment-status.md`](results/experiment-status.md). Detailed cluster and troubleshooting history is in [`results/history.md`](results/history.md).
+| Condition | What the agent gets |
+|---|---|
+| **A0** | No memory |
+| **R25** | Memory built from a random 25% of the corpus (smaller) |
+| **M3** | Memory built from the whole corpus, with a complete topic index |
 
-## OpenCode + Qwen3-Coder 30B follow-up
+Everything else is identical across conditions: task, model, prompt, time limit and grader. A plan fixed in advance ([preregistration](results/preregistration-v1.md)) sets the trial order and the analysis before any result is seen.
 
-An early Harbor + OpenCode attempt failed before Ollama received an inference request; details are in [`results/opencode-awilix-status.md`](results/opencode-awilix-status.md). After fixing local model discovery, a later Awilix A/B pair ran on an RTX 3090 with the loaded 30B Q4 model at 32K context. Both conditions reached the unchanged verifier and scored 0. The agents behaved differently, but neither solved the task; the detailed results are in the same status report.
+## Results so far
 
-Two additional official FrontierMemory v1.0 tasks were then run with the same OpenCode, Ollama, and Apptainer stack. The cattrs A/B verifier pair scored 0 in both conditions; A made edits but did not commit them, while B stopped early after repeated tool errors. Cookie-store agents made edits, but both verifier attempts failed before producing scores because the runtime verifier workspace lacked an upstream test fixture. See [`results/additional-opencode-frontiermemory-evaluation.md`](results/additional-opencode-frontiermemory-evaluation.md) for the sanitized metrics and [`results/history.md`](results/history.md) for setup and troubleshooting details. These are exploratory diagnostics, not leaderboard results.
+| Task | No memory | R25 | M3 |
+|---|---|---|---|
+| Word2Vec pipeline | 0/5 pass | **5/5** | **5/5** |
+| DAPT intrusion detection | 0/5 pass (26.4/37 tests) | 1/5 pass (31.4/37) | 0/5 pass (20.0/37) |
+| awilix (×2), customer-delivery, cattrs, cookie-store | running | | |
 
-A later matched run of `cattrs-compositional-changelog` used the same RTX 3090 and 30B model; B used the frozen historical memory. The no-memory agent produced a partial implementation (18/70 functional checks), while the memory agent stopped before editing after repeated reads. Both original verifiers ran, but this pair does not establish a memory effect. See [`results/cattrs-opencode-paired-3090-2026-10-26.md`](results/cattrs-opencode-paired-3090-2026-10-26.md) for sanitized metrics and termination details.
+Things we learned along the way:
 
-## Qwen3.8-27B no-memory baseline
+- **Memory helps most when a task depends on conventions from earlier runs.** On Word2Vec, every no-memory run failed to produce output in the required format; every run with memory got it right.
+- **Codex only puts part of the memory into the prompt**: the first and last 5,000 characters. The rest is reachable only if the agent searches for it. Agents do search when the task cues them (all 10 Word2Vec memory runs did) and often skip it otherwise. We had predicted the opposite for M3 and were wrong; the [interim results](results/matrix-v1-interim.md) report that openly.
+- **More memory isn't automatically better.** On DAPT, the smaller R25 memory did best and the full-corpus M3 did worst.
+- **Checking memory quality automatically is hard.** Our attempts at a "memory governor" that filters bad lessons failed their own validation tests, so we report that as a finding ([governor summary](results/governor-validation-summary.md)).
 
-Two independent OpenCode runs on `cattrs-compositional-changelog` used the official Ollama Q4_K_M tag on an RTX 3090 because all RTX 6000 Ada GPUs were allocated. Both agents returned empty patches; the original verifier reported 0/70 functional checks and 7/7 preference checks for each. The first attempt was manually stopped after read-only inspection, and the second exited at the configured output-token limit. See [`results/qwen38-cattrs-q4-baselines-2026-10-26.md`](results/qwen38-cattrs-q4-baselines-2026-10-26.md). No memory condition was run because neither attempt made implementation progress.
+## Still to do
 
-## Setup and deviations
+- Finish the remaining five tasks (about 3 more days of GPU time, one job at a time).
+- Final analysis.
+- Memory-quality audit.
+- A check of whether harm from memory comes from lessons about *other* tasks ("scope leakage").
+- An audit of the corpus update: FrontierMemory released corpus v1.1 on Oct 29 to remove metadata that could enable reward hacking. Our study stays on v1.0, and we will check whether our memories contained any of that metadata.
+- Write the paper.
+- Package the memory builder as a leaderboard submission.
 
-- Cluster: Slurm, Apptainer 1.5.2, NVIDIA RTX 2080 Ti with 10.6 GiB VRAM. Docker was unavailable; Harbor 0.24.0's Singularity backend was invoked through `bin/singularity`.
-- Model: Qwen2.5-Coder 7B Q4 in persistent cluster storage. The preferred 14B allocation had an approximately eight-hour queue estimate, so the user-approved 7B fallback was used. Inference used local Ollama 0.40.11; no paid API was used.
-- Data: official FrontierMemory v1.0 gated corpus, pinned to revision `67250357405072066498c061f9af0eccfdac20c0`. The target task was not downloaded or inspected until memory generation had finished.
-- Memory: generated with the same local 7B model from aggregate/command-frequency evidence. It is a weak frequency summary, not semantic synthesis of complete trajectories; opaque corpus filenames cannot be mapped to source tasks, and command frequency does not show causation.
-- Harbor's Apptainer backend cannot enforce the task's original `no-network` policy. A local staging copy used `public` network modes so Harbor would run; egress isolation was not guaranteed. Both A and B used this same nonstandard setup and had only the local model endpoint configured.
-- The official task and verifier files were left unchanged. Their container images were adapted to Apptainer SIFs from the pinned Docker bases. The separate verifier SIF contains the files from the official `tests/Dockerfile` plus FastAPI/Uvicorn needed by Harbor.
-- Mini-SWE-Agent defaults to unlimited steps. Both conditions were given the same 50-model-call limit after an unbounded pilot repeated source reads; both hit the cap. The original verifier still ran and returned reward 0.0 for each.
+## How it's set up, briefly
 
-## Reproduction outline
+- **Hardware and models.** Slurm cluster with RTX 3090 GPUs. Ollama serves Qwen3.8-27B. No paid APIs.
+- **Containers.** Apptainer, since Docker isn't available, driven by Harbor's Singularity backend.
+- **Deviations from the official setup.** Every one is listed in [the protocol](results/protocol-v3-official-like.md), for example network-mode staging and a uid workaround in some verifier images.
+- **Grading checks.** Each task's grading path is checked with the reference solution ("oracle checks" in `results/*-oracle-check-summary.md`).
+- **Decision history.** Every decision is in an append-only [decisions log](results/decisions-log-detailed.md). The earliest exploratory runs (Mini-SWE-Agent and OpenCode with smaller models, all scoring 0) are in [early exploration](results/early-exploration.md) and [history](results/history.md).
 
-The gated benchmark source and model weights are not distributed here. Obtain access to the official FrontierMemory v1.0 corpus and Harbor task data through their original sources, then reproduce the phase order:
-
-1. Install FrontierMemory, Harbor, Ollama, and Mini-SWE-Agent in the cluster environment. Provision Apptainer SIFs and the Python 3.12 agent runtime using the definitions and scripts in `containers/`, `runtime` (created locally), and `slurm/`.
-2. Fetch only the pinned historical v1.0 corpus and generate memory before downloading the target task. The local implementation is `scripts/summarize_frontiermemory_corpus.py` plus `scripts/generate_memory_from_evidence.py`.
-3. Download the official task and use `containers/awilix-release-tier-implicit.def`, `containers/awilix-release-tier-implicit-serverdeps.def`, and `containers/awilix-release-tier-implicit-verifier.def` to build the Apptainer images. The task staging copy must point the agent and separate verifier environments to their respective SIFs.
-4. Prepare B's config locally with the gated-derived memory:
-
-   ```bash
-   python scripts/render_memory_config.py --memory /path/to/local/MEMORY.md
-   ```
-
-   The generated `configs/mini-swe-ollama-7b-memory.yaml` is intentionally ignored by Git.
-5. Run the paired Slurm script with `sbatch slurm/run-awilix-ab.sbatch`. Update its cluster-specific absolute paths if installing elsewhere. It starts Ollama once and runs A then B sequentially.
-
-For the later OpenCode runs, use `scripts/stage_frontiermemory_task_for_apptainer.py` to create a local staged task copy, `slurm/build-frontiermemory-verifier-images.sbatch` for the task-specific verifier SIFs, and `slurm/run-opencode-frontiermemory-tasks.sbatch` for the OpenCode A/B runs. These scripts document the local image paths and preserve the downloaded task/verifier sources. The cookie-store verifier workspace mismatch remains unresolved, so those two verifier outcomes are not valid task scores.
-
-Raw gated corpus files, task/verifier files, derived memory, model weights, raw trajectories, tool runtimes, and unfiltered logs are intentionally excluded from this repository. They remain in the local experiment workspace under the relevant access restrictions.
+The gated corpus, task and verifier files, generated memories, raw agent traces and model weights are deliberately **not** in this repo. They stay on the cluster under the benchmark's access terms. The repo holds only code, methods and summarized results.
