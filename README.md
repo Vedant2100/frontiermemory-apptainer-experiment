@@ -53,7 +53,7 @@ Things we learned along the way:
 - Final analysis.
 - Memory-quality audit.
 - A check of whether harm from memory comes from lessons about *other* tasks ("scope leakage").
-- An audit of the corpus update: FrontierMemory released corpus v1.1 on Oct 29 to remove metadata that could enable reward hacking. Our study stays on v1.0, and we will check whether our memories contained any of that metadata.
+- ~~Audit of the corpus update~~ (done): FrontierMemory released corpus v1.1 on Oct 29 to remove metadata that could enable reward hacking. Our study stays on v1.0. The audit found that none of that metadata reached our memories ([audit](results/corpus-v1.1-audit.md)).
 - Write the paper.
 - Package the memory builder as a leaderboard submission.
 
