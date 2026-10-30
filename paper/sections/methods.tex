@@ -1,0 +1,74 @@
+% Methods draft (2026-10-30). FORGE 2027, IEEEtran, double-anonymous: no repo URLs, names or cluster identifiers.
+% Numbers marked \todo{} are filled in once the confirmatory matrix completes.
+\section{Method}
+\label{sec:method}
+
+\subsection{Benchmark, tasks and agent}
+FrontierMemory v1.0 provides a gated corpus of 674 prior agent trajectories (184 pass, 490 fail), a fixed memory-generation instruction, and 15 held-out tasks graded by hidden verifiers.
+Memory systems are compared by the solve rate of a fixed task agent that reads the memory; the public leaderboard reports no no-memory baseline.
+We run the 7 tasks whose official images and verifiers we could execute without Docker: a Word2Vec pipeline, a network-intrusion workflow (DAPT), and five repository tasks that require a patch to an open-source library (cattrs, a cookie store, two dependency-injection release tiers, and a customer-delivery service).
+Several repository tasks include a \emph{user-preference} check that only knowledge carried over from earlier runs can satisfy.
+
+The task agent is Codex CLI~0.157 with its built-in memory mechanism, driving a local Qwen3.8-27B model (4-bit, 65{,}536-token context, effort \emph{medium}) served by Ollama.
+Each trial starts from a fresh workspace and a fresh agent home; web search is disabled and the local model is the only endpoint.
+Tasks run in Apptainer containers via Harbor's Singularity backend.
+No paid API is used anywhere.
+
+\subsection{Memory construction}
+No memory is written or edited by a person.
+A four-stage pipeline, run by the same local model, gives the official instruction verbatim to every call:
+(i)~one note per trajectory;
+(ii)~grouping of notes by topic label;
+(iii)~one topic file per group, with step-level citations into the corpus;
+(iv)~an index file, \texttt{MEMORY.md}, that summarises and points to the topic files.
+Each memory passes the benchmark's format check and is frozen by content hash before any trial.
+
+We compare three arms:
+\textbf{A0}, no memory;
+\textbf{M3}, memory from the whole corpus (324 topic files), with a mechanically appended complete topic list because the generated index covered only 106 topics;
+\textbf{R25}, the same pipeline on a stratified random 25\% of trajectories (seed fixed; 116 topic files).
+Within a task, arms differ only in the memory folder.
+
+\subsection{Grading validity}
+Because we replace Docker with Apptainer, we validate every task's grading path before use.
+The reference solution must pass, an empty submission must score zero, and a patch collected in a scratch run must equal the local one, all with the unmodified verifier.
+All 7 tasks pass these checks.
+Deviations needed to run them (network-mode staging, a uid alias in some verifier images) are declared in the supplementary material.
+A trial is invalid only if the infrastructure fails.
+Agent-caused failures, including timeouts, missing artifacts and uncommitted patches, score zero.
+
+\subsection{Design and analysis}
+The design, arms, memory hashes, trial order and analysis were preregistered before any confirmatory trial.
+Amendments are dated and made before the outcomes they could affect.
+Each task runs as one job of 15 trials (5 per arm) in a balanced Latin order.
+The primary outcome is strict pass (verifier reward~1).
+The secondary outcome is the fraction of verifier cases passed.
+For patch tasks we also report a conservative lower bound that discounts tests the agent added itself.
+The primary contrasts are H0: M3\,$>$\,A0 and H1: M3\,$>$\,R25, tested by exact paired sign-flip permutation over tasks and Holm-corrected; we report effect sizes with exact intervals.
+
+\paragraph{Memory exposure}
+Codex injects only the first and last 5{,}000 characters of \texttt{MEMORY.md} into the prompt; the agent can read the rest of the folder with its own tools.
+For every memory trial we therefore log (a)~which topic entries fall inside the injected window, reproduced offline and checked against the logged model requests, and (b)~which memory files the agent opened.
+This lets us separate memory that is \emph{shown} from memory that is \emph{sought}.
+
+\paragraph{Memory quality}
+On each frozen memory we measure, without feeding anything back:
+\begin{itemize}
+  \item unit counts;
+  \item copied-code units;
+  \item the share of units with resolvable citations;
+  \item a deterministic grounding rate: whether a lesson's concrete identifiers and values occur in the steps it cites.
+\end{itemize}
+We also report our preregistered attempts to \emph{filter} memory automatically, with two LLM judges and the grounding rule.
+All three failed their validation gates, so the planned governed-memory arms were dropped.
+
+\paragraph{Deviations}
+The deviations from the official protocol are:
+\begin{itemize}
+  \item a local task model instead of the leaderboard models;
+  \item 7 of the 15 tasks;
+  \item memory generation of about 7\,h instead of 6\,h;
+  \item network-mode staging;
+  \item the runner's output-artifact header.
+\end{itemize}
+The corpus was updated to v1.1 during the study, to remove metadata that could enable reward hacking. Our evidence pipeline passes only message text, tool calls and tool outputs, and an audit confirms that none of the removed metadata reached our memories.
